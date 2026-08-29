@@ -56,6 +56,19 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
     final mesh = widget.mesh;
     final activeMissing = _reports.where((r) => !r.found).length;
     final scanningOk = mesh.scanning && mesh.bluetoothOn;
+    final helpPoints = mesh.helpPointsInRange;
+
+    // The most recent alert this phone sent that hasn't been closed — or,
+    // if it has, only while it's fresh enough to still be the thing on this
+    // person's mind. An SOS from three hours ago is history, not status.
+    final myAlerts = mesh.alerts.where((a) => a.mine).toList()
+      ..sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
+    final AlertRecord? myAlert = myAlerts.isEmpty
+        ? null
+        : (myAlerts.first.isResolved &&
+                DateTime.now().difference(myAlerts.first.receivedAt).inMinutes > 30
+            ? null
+            : myAlerts.first);
 
     return CustomScrollView(
       slivers: [
@@ -103,7 +116,21 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
               // headcount and member list), then the two actions side by
               // side. No section headers: with only three tiles the labels
               // were adding a layer of hierarchy the screen doesn't need.
+              // Your own alert first when you have one in flight. Someone
+              // who has just pressed SOS is looking at this screen for one
+              // reason: to find out whether anything happened.
+              if (myAlert != null) ...[
+                MyAlertCard(
+                  alert: myAlert,
+                  nameFor: (id) => mesh.nameFor(id) ?? id,
+                ),
+                const SizedBox(height: 12),
+              ],
               StatusBox(bluetoothOn: mesh.bluetoothOn, scanningOk: scanningOk),
+              if (helpPoints.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                HelpPointsCard(points: helpPoints),
+              ],
               const SizedBox(height: 12),
               DindiCard(
                 groupOrId: widget.warkari.groupOrId,

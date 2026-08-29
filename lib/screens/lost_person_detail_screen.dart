@@ -43,6 +43,28 @@ class _LostPersonDetailScreenState extends State<LostPersonDetailScreen> {
       newFound ? '🎉 ${_report.name} marked as FOUND' : '${_report.name} marked as still missing',
       newFound ? 'Relayed' : 'Warning',
     );
+
+    // Marking someone found used to be a purely local act: this phone's
+    // list changed and every other phone on the Wari kept relaying "look
+    // out for this person" for as long as the alert had airtime. If the
+    // report was ever broadcast, closing it has to go out too — that is the
+    // whole reason RESOLVE exists (see kResolvePacketType).
+    final msgId = _report.msgId;
+    if (msgId != null) {
+      if (newFound) {
+        await widget.mesh.resolveByMsgId(msgId);
+      } else {
+        // Reopening is local-only on purpose. There is no "un-resolve"
+        // packet, and inventing one would let a single phone restart a
+        // search across the whole route. Rebroadcast is the deliberate,
+        // visible way to put the alert back on the air.
+        widget.mesh.appendLog(
+          'Reopened locally — use Broadcast again to put it back on the mesh',
+          'Warning',
+        );
+      }
+    }
+
     setState(() => _report = _report.copyWith(found: newFound));
   }
 

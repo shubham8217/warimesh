@@ -85,13 +85,15 @@ void main() {
     });
     await tester.pump();
 
-    expect(find.textContaining('WariMesh'), findsWidgets);
-    expect(find.text('Send SOS'), findsOneWidget);
-    // Volunteer-only: the activity feed. Both roles now share the same home
-    // layout (see home_widgets.dart), so the distinguishing marker can't be
-    // an action tile any more — it has to be something only a volunteer is
-    // shown.
-    expect(find.text('Recent activity'), findsOneWidget);
+    // A volunteer's home is their duty state, not a copy of the warkari
+    // dashboard. The two markers below are what distinguishes the roles now:
+    // the response queue at the top, and the help-point switch. Neither
+    // exists for a warkari, and "Send SOS" no longer sits on this screen at
+    // all — it moved to the overflow menu, because a volunteer opens this
+    // app to find out who needs them, not to raise an alarm themselves.
+    expect(find.text('Nobody waiting'), findsOneWidget);
+    expect(find.text('Not at a help point'), findsWidgets);
+    expect(find.text('Send SOS'), findsNothing);
     expect(find.textContaining('Namaskar'), findsNothing);
     // The Dindi card must be present for a volunteer too. It was missing
     // from this screen entirely, which left a volunteer with no way to

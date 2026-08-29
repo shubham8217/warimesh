@@ -16,12 +16,23 @@ import 'models.dart';
 
 class AppDatabase {
   static Database? _db;
-  static const int _version = 7;
+  static const int _version = 8;
+
+  /// The database filename. A constant in the app; overridable only so that
+  /// test files can each own their own file.
+  ///
+  /// `flutter test` runs test files in PARALLEL processes, and they share a
+  /// databases directory. database_test.dart deletes the file to exercise
+  /// onCreate while migration_test.dart seeds an old schema to exercise
+  /// onUpgrade — pointed at one filename, those two races produce a suite
+  /// that passes file-by-file and fails when run together, which is the
+  /// most expensive kind of test failure to chase.
+  static String databaseName = 'warimesh.db';
 
   static Future<Database> get instance async {
     if (_db != null) return _db!;
     final dbPath = await getDatabasesPath();
-    final path = p.join(dbPath, 'warimesh.db');
+    final path = p.join(dbPath, databaseName);
     _db = await openDatabase(
       path,
       version: _version,
@@ -31,6 +42,7 @@ class AppDatabase {
         await _createVolunteerProfile(db);
         await _createKnownDindis(db);
         await _createMessages(db);
+        await _createAlerts(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -43,13 +55,8 @@ class AppDatabase {
           // Two sign-in roles now share this table (see UserRole in
           // models.dart) — a pre-existing row is someone who signed in
           // before roles existed, i.e. a volunteer.
-          await db.execute("ALTER TABLE volunteer_profile ADD COLUMN role TEXT NOT NULL DEFAULT 'volunteer'");
-        }
-        if (oldVersion < 6) {
-          await _createKnownDindis(db);
-        }
-        if (oldVersion < 7) {
-          await _createMessages(db);
+          await _addColumnIfMissing(
+              db, 'volunteer_profile', 'role', "TEXT NOT NULL DEFAULT 'volunteer'");
         }
         if (oldVersion < 5) {
           // Persistent Mesh ID (see generateMeshId() in models.dart). Left
@@ -57,11 +64,88 @@ class AppDatabase {
           // generates one on first read after upgrade and UserDb.current()
           // persists it immediately, rather than backfilling here with no
           // access to the role-aware generator.
-          await db.execute('ALTER TABLE volunteer_profile ADD COLUMN mesh_id TEXT');
+          await _addColumnIfMissing(db, 'volunteer_profile', 'mesh_id', 'TEXT');
+        }
+        if (oldVersion < 6) {
+          await _createKnownDindis(db);
+        }
+        if (oldVersion < 7) {
+          await _createMessages(db);
+        }
+        if (oldVersion < 8) {
+          await _createAlerts(db);
+          // Which kind of help point this volunteer is staffing, broadcast
+          // in the presence beacon. Defaults to none: a phone must never
+          // claim to be a medical point because of a migration.
+          await _addColumnIfMissing(
+              db, 'volunteer_profile', 'station', 'INTEGER NOT NULL DEFAULT 0');
         }
       },
     );
     return _db!;
+  }
+
+  /// Adds a column only when the table doesn't already have it.
+  ///
+  /// Every ALTER in the migration chain goes through this, because of a
+  /// trap that took the app down on a real phone: the create-table helpers
+  /// below describe the schema as it is TODAY, but they are also called from
+  /// old migration steps (`oldVersion < 3` creates volunteer_profile). So a
+  /// database old enough to hit that step gets the modern table — role,
+  /// mesh_id and station included — and then the very next step tries to
+  /// ALTER a `role` column that already exists. SQLite raises "duplicate
+  /// column name", openDatabase aborts, and the app comes up with no
+  /// persistence at all: no sign-in, no queue, nothing kept.
+  ///
+  /// Checking first makes each step idempotent, which also makes the order
+  /// of the steps stop mattering — worth having, since they were not in
+  /// version order and nobody had noticed.
+  ///
+  /// Reached more often than it looks like it should: Android's auto-backup
+  /// can restore an old app database onto a fresh install, so "nobody still
+  /// has a v2 database" is not an assumption this code gets to make.
+  static Future<void> _addColumnIfMissing(
+    Database db,
+    String table,
+    String column,
+    String definition,
+  ) async {
+    final columns = await db.rawQuery('PRAGMA table_info($table)');
+    final exists = columns.any((c) => c['name'] == column);
+    if (exists) return;
+    await db.execute('ALTER TABLE $table ADD COLUMN $column $definition');
+  }
+
+  /// Every alert this phone has seen or sent, and where it stands.
+  ///
+  /// Distinct from seen_messages, which is a bare dedup ledger the relay
+  /// consults and nothing more. This table is the volunteer's work queue:
+  /// it has to survive an app restart, because an SOS that scrolls out of
+  /// an in-memory list the moment the process dies is not a queue, it is a
+  /// notification. claimed_by / resolved_by hold a Mesh ID — including this
+  /// phone's own when the claim was made here.
+  static Future<void> _createAlerts(Database db) async {
+    await db.execute("""
+      CREATE TABLE IF NOT EXISTS alerts (
+        msg_id INTEGER PRIMARY KEY,
+        category INTEGER NOT NULL,
+        sender_label TEXT NOT NULL,
+        sender_name TEXT,
+        group_tag TEXT,
+        received_at INTEGER NOT NULL,
+        hops INTEGER NOT NULL DEFAULT 0,
+        mine INTEGER NOT NULL DEFAULT 0,
+        lost_name TEXT,
+        lost_age TEXT,
+        latitude REAL,
+        longitude REAL,
+        claimed_by TEXT,
+        claimed_at INTEGER,
+        resolved_by TEXT,
+        resolved_reason INTEGER,
+        resolved_at INTEGER
+      )
+    """);
   }
 
   static Future<void> _createSeenMessages(Database db) async {
@@ -86,7 +170,12 @@ class AppDatabase {
         role TEXT NOT NULL DEFAULT 'volunteer',
         volunteer_id TEXT NOT NULL,
         mesh_id TEXT,
-        logged_in_at INTEGER NOT NULL
+        logged_in_at INTEGER NOT NULL,
+        -- Kept in step with the v8 ALTER in onUpgrade. Every column added by
+        -- a migration has to be added here too, or a fresh install and an
+        -- upgraded install end up with different tables — and the fresh one
+        -- breaks, which is the case that gets tested least.
+        station INTEGER NOT NULL DEFAULT 0
       )
     ''');
   }
@@ -185,6 +274,97 @@ class SeenMessagesDb {
 }
 
 // ===================== lost_reports =====================
+
+/// The alert queue's storage. See [AlertRecord] for why alerts are stored
+/// at all rather than just notified.
+class AlertsDb {
+  /// Records an alert if it's new. Deliberately does NOT overwrite an
+  /// existing row: the same alert arrives repeatedly as neighbours re-air
+  /// it, and clobbering the row each time would wipe a claim a volunteer
+  /// had already made on it.
+  static Future<void> insertIfNew(AlertRecord record) async {
+    final db = await AppDatabase.instance;
+    await db.insert(
+      'alerts',
+      record.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+  }
+
+  /// Fills in the "who to look for" detail, which travels as its own packet
+  /// and can land after the alert it belongs to.
+  static Future<void> setLostDetail(int msgId, String name, String age) async {
+    final db = await AppDatabase.instance;
+    await db.update(
+      'alerts',
+      {'lost_name': name, 'lost_age': age},
+      where: 'msg_id = ?',
+      whereArgs: [msgId],
+    );
+  }
+
+  static Future<void> setLocation(int msgId, double lat, double lon) async {
+    final db = await AppDatabase.instance;
+    await db.update(
+      'alerts',
+      {'latitude': lat, 'longitude': lon},
+      where: 'msg_id = ?',
+      whereArgs: [msgId],
+    );
+  }
+
+  /// Records a claim, but never over-writes an earlier one: when two
+  /// volunteers claim the same alert within a few seconds of each other,
+  /// the first claim heard is the one that stands on this phone. Whichever
+  /// of them actually gets there first is a matter for the two humans; the
+  /// mesh's job is to stop the queue flip-flopping between them.
+  static Future<void> setClaim(int msgId, String meshId, DateTime at) async {
+    final db = await AppDatabase.instance;
+    await db.update(
+      'alerts',
+      {'claimed_by': meshId, 'claimed_at': at.millisecondsSinceEpoch},
+      where: 'msg_id = ? AND claimed_by IS NULL',
+      whereArgs: [msgId],
+    );
+  }
+
+  static Future<void> setResolved(
+      int msgId, String meshId, int reason, DateTime at) async {
+    final db = await AppDatabase.instance;
+    await db.update(
+      'alerts',
+      {
+        'resolved_by': meshId,
+        'resolved_reason': reason,
+        'resolved_at': at.millisecondsSinceEpoch,
+      },
+      where: 'msg_id = ?',
+      whereArgs: [msgId],
+    );
+  }
+
+  /// Undoes a resolution. Exists because a RESOLVE packet is unsigned and
+  /// unverifiable (see kResolvePacketType) — a volunteer must always be
+  /// able to say "no, this person is still missing" and put the alert back
+  /// in the queue.
+  static Future<void> reopen(int msgId) async {
+    final db = await AppDatabase.instance;
+    await db.update(
+      'alerts',
+      {'resolved_by': null, 'resolved_reason': null, 'resolved_at': null},
+      where: 'msg_id = ?',
+      whereArgs: [msgId],
+    );
+  }
+
+  /// The queue, newest first. Ordering into triage order happens in the UI
+  /// against [AlertRecord.triageRank], since that depends on live state.
+  static Future<List<AlertRecord>> all() async {
+    final db = await AppDatabase.instance;
+    final rows = await db.query('alerts', orderBy: 'received_at DESC', limit: 200);
+    return rows.map(AlertRecord.fromMap).toList();
+  }
+}
 
 class LostReportsDb {
   static Future<int> insert(LostReport report) async {

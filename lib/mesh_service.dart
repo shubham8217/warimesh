@@ -71,6 +71,16 @@ const int kPriorityPresence = 0;
 const int kPriorityText = 1;
 const int kPriorityAlert = 2;
 
+// ACK and RESOLVE ride at kPriorityAlert, NOT above it. It's tempting to
+// give a response packet the top of the pecking order — it is, after all,
+// the most welcome thing on the network — but the top-tier rule in
+// _serviceAdvertSlotInner means a strictly higher priority would silence
+// every alert relay for as long as the response is on the air. An ACK that
+// stops an SOS propagating is a bug wearing a helpful face. Same tier,
+// sharing the rotation, is the correct relationship: a response matters
+// exactly as much as the alert it answers.
+const Duration kResponseAirtime = Duration(seconds: 45);
+
 /// One payload this phone is currently putting on the air, and until when.
 ///
 /// [key] identifies the payload so re-registering the same alert refreshes
@@ -104,7 +114,46 @@ class _PresenceEntry {
   final String groupTag;
   final String name;
   final DateTime lastHeard;
-  _PresenceEntry(this.groupTag, this.name, this.lastHeard);
+  final int station;
+  _PresenceEntry(this.groupTag, this.name, this.lastHeard, this.station);
+}
+
+/// A volunteer's phone heard nearby that is staffing a help point.
+///
+/// There is deliberately no distance or direction here, and that is not an
+/// omission. A presence beacon carries no location — by design, since a
+/// continuously broadcast position is a very different privacy proposition
+/// from the one-off position attached to an alert you chose to send. What
+/// stands in for a distance is the physics: BLE advertising carries on the
+/// order of tens of metres in a dense crowd. If you can hear this beacon at
+/// all, the help point is close enough to walk to. "In range" IS the
+/// proximity signal, and the UI says exactly that rather than inventing a
+/// precision the packet doesn't contain.
+class HelpPoint {
+  final String meshId;
+  final String name;
+  final int station;
+  final DateTime lastHeard;
+
+  HelpPoint({
+    required this.meshId,
+    required this.name,
+    required this.station,
+    required this.lastHeard,
+  });
+
+  String get label => stationLabel(station);
+
+  /// "heard just now" / "heard 2 min ago" — the honest freshness signal.
+  /// A volunteer walks away and their beacon goes stale; a help point that
+  /// was here 40 seconds ago is worth walking towards, one from 20 minutes
+  /// ago is not, and the difference must be visible.
+  String get freshnessLabel {
+    final secs = DateTime.now().difference(lastHeard).inSeconds;
+    if (secs < 30) return 'heard just now';
+    if (secs < 90) return 'heard a minute ago';
+    return 'heard ${(secs / 60).round()} min ago';
+  }
 }
 
 class MeshService extends ChangeNotifier {
@@ -118,6 +167,14 @@ class MeshService extends ChangeNotifier {
   String _myGroupTag = '--';
   String _myName = '';
   UserRole _myRole = UserRole.volunteer;
+  int _myStation = kStationNone;
+
+  /// This phone's own Mesh ID, as it appears in every packet it sends.
+  String get myMeshId => deviceLabel;
+
+  /// Which help point this phone is announcing, or [kStationNone].
+  int get myStation => _myStation;
+  bool get onDuty => _myStation != kStationNone;
 
   final List<LogEntry> log = [];
   int seenCount = 0;
@@ -152,6 +209,48 @@ class MeshService extends ChangeNotifier {
   // traffic, and never relayed further (single-hop by construction).
   final Map<String, _PresenceEntry> _presence = {};
 
+  /// The durable alert queue — every alert this phone has received or sent,
+  /// with who is responding and whether it's closed. Loaded from SQLite at
+  /// bootstrap and kept in sync from there; see [AlertRecord].
+  final List<AlertRecord> alerts = [];
+
+  /// Alerts still needing someone, in triage order. This is the volunteer's
+  /// actual workload and the number on the Alerts tab badge.
+  List<AlertRecord> get openAlerts =>
+      alerts.where((a) => !a.isResolved && !a.mine).toList()..sort(_byTriage);
+
+  /// The whole queue in triage order, resolved ones sunk to the bottom.
+  List<AlertRecord> get triagedAlerts => List<AlertRecord>.from(alerts)..sort(_byTriage);
+
+  int get unclaimedCount => alerts.where((a) => a.isOpen && !a.mine).length;
+
+  static int _byTriage(AlertRecord a, AlertRecord b) {
+    final rank = a.triageRank.compareTo(b.triageRank);
+    if (rank != 0) return rank;
+    // Within a tier, oldest first: the person who has been waiting longest
+    // is the person who has been waiting longest.
+    return a.receivedAt.compareTo(b.receivedAt);
+  }
+
+  /// Help points heard recently, freshest first. See [HelpPoint] for why
+  /// there is no distance attached to these.
+  List<HelpPoint> get helpPointsInRange {
+    final cutoff = DateTime.now().subtract(kPresenceExpiry);
+    final points = <HelpPoint>[];
+    _presence.forEach((meshId, entry) {
+      if (entry.station == kStationNone) return;
+      if (entry.lastHeard.isBefore(cutoff)) return;
+      points.add(HelpPoint(
+        meshId: meshId,
+        name: entry.name,
+        station: entry.station,
+        lastHeard: entry.lastHeard,
+      ));
+    });
+    points.sort((a, b) => b.lastHeard.compareTo(a.lastHeard));
+    return points;
+  }
+
   /// Dindi members heard recently (within kPresenceExpiry), plus yourself.
   int get dindiHeadcount => 1 + dindiMemberNames.length;
 
@@ -181,6 +280,12 @@ class MeshService extends ChangeNotifier {
   // this; a fragment is far more numerous and far less important, so an
   // in-memory set is the right trade.
   final Set<String> _relayedFragments = {};
+
+  // Response packets (ACK / RESOLVE) this phone has already passed on.
+  // Neither format has room for a TTL, so relay-exactly-once per phone is
+  // what stops a response echoing around a dense crowd forever. Same
+  // approach as _relayedFragments above.
+  final Set<String> _relayedResponses = {};
 
   // Messages already reassembled in full. The sender re-airs every fragment
   // for the whole of kTextAirtime, so the same message arrives over and
@@ -256,10 +361,27 @@ class MeshService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Goes on or off duty at a help point. Takes effect on the next presence
+  /// beacon, and re-airs one immediately so a volunteer who has just opened
+  /// the water tent doesn't stay invisible for up to 15 seconds.
+  void setStation(int station) {
+    if (_myStation == station) return;
+    _myStation = station;
+    appendLog(
+      station == kStationNone
+          ? 'Off duty — no longer announcing a help point'
+          : 'On duty: ${stationLabel(station)} — nearby phones will see this',
+      'Sent',
+    );
+    _broadcastPresence();
+    notifyListeners();
+  }
+
   Future<void> bootstrap(UserProfile profile) async {
     deviceLabel = profile.meshId;
     _myGroupTag = profile.dindiTag;
     _myRole = profile.role;
+    _myStation = profile.role == UserRole.volunteer ? profile.station : kStationNone;
     _myName = profile.name.trim().split(RegExp(r'\s+')).first;
 
     // Each step is independently guarded: one subsystem failing (DB won't
@@ -283,6 +405,7 @@ class MeshService extends ChangeNotifier {
     try {
       await AppDatabase.instance; // ensure tables exist
       await refreshSeenCount();
+      await loadAlerts();
     } catch (e) {
       appendLog('Local database unavailable — activity won\'t persist: $e', 'Warning');
     }
@@ -600,7 +723,12 @@ class MeshService extends ChangeNotifier {
     // Lowest priority: a headcount beacon may never cost an alert airtime.
     // Its airtime runs slightly past the next tick so the beacon stays in
     // the rotation continuously rather than blinking out between ticks.
-    final packet = PresencePacket(meshId: deviceLabel, groupTag: _myGroupTag, name: _myName);
+    final packet = PresencePacket(
+      meshId: deviceLabel,
+      groupTag: _myGroupTag,
+      name: _myName,
+      station: _myStation,
+    );
     _queueBroadcast('presence', packet.encode(), kPresenceInterval * 2, priority: 0);
   }
 
@@ -609,6 +737,18 @@ class MeshService extends ChangeNotifier {
   /// Re-registering the same [key] refreshes that payload's airtime in
   /// place — hearing the same relayed alert twice extends how long we
   /// carry it rather than queueing it twice.
+  /// Takes a payload off the air before its airtime is up.
+  ///
+  /// Every other broadcast in this service expires on a timer, because
+  /// almost everything here should keep repeating until it has had a fair
+  /// chance to be heard. A resolved alert is the one case that runs the
+  /// other way: continuing to advertise "this child is missing" after she
+  /// has been found is not merely wasted airtime, it sends people looking
+  /// for someone who is already safe.
+  void _cancelBroadcast(String key) {
+    _broadcasts.removeWhere((b) => b.key == key);
+  }
+
   void _queueBroadcast(
     String key,
     Uint8List bytes,
@@ -744,6 +884,18 @@ class MeshService extends ChangeNotifier {
         continue;
       }
 
+      if (data[0] == kAckPacketType) {
+        final ack = AckPacket.decode(data);
+        if (ack != null) unawaited(_handleAck(ack));
+        continue;
+      }
+
+      if (data[0] == kResolvePacketType) {
+        final res = ResolvePacket.decode(data);
+        if (res != null) unawaited(_handleResolve(res));
+        continue;
+      }
+
       final packet = MeshPacket.decode(data);
       if (packet == null) continue;
       unawaited(_handleReceivedPacket(packet));
@@ -752,12 +904,272 @@ class MeshService extends ChangeNotifier {
 
   void _handlePresence(PresencePacket packet) {
     if (packet.meshId == deviceLabel) return; // our own beacon bouncing back
-    _presence[packet.meshId] = _PresenceEntry(packet.groupTag, packet.name, DateTime.now());
+    _presence[packet.meshId] =
+        _PresenceEntry(packet.groupTag, packet.name, DateTime.now(), packet.station);
     notifyListeners();
+  }
+
+  // ---------------------------------------------------------------------
+  // The alert queue — receiving, claiming and closing.
+  //
+  // Everything above this point is about getting an alarm to travel. This
+  // section is about what happens next: somebody has to pick it up, and
+  // somebody has to be able to say it's over. See AlertRecord in models.dart
+  // for why these are stored rather than merely notified.
+  // ---------------------------------------------------------------------
+
+  /// Reads the queue back from SQLite. Called at bootstrap, and again after
+  /// anything that changes a row, so the in-memory list and the database
+  /// can't drift apart.
+  Future<void> loadAlerts() async {
+    try {
+      final rows = await AlertsDb.all();
+      alerts
+        ..clear()
+        ..addAll(rows);
+      _stampDistances();
+      notifyListeners();
+    } catch (e) {
+      appendLog('Could not load the alert queue: $e', 'Warning');
+    }
+  }
+
+  /// Recomputes how far away each located alert is, from wherever this
+  /// phone is now. Cheap, and correct only at the moment it runs — which is
+  /// why it runs on every queue load rather than being stored.
+  void _stampDistances() {
+    final me = location.lastKnown;
+    if (me == null) return;
+    for (final a in alerts) {
+      final lat = a.latitude, lon = a.longitude;
+      if (lat == null || lon == null) continue;
+      a.distanceMetres = LocationService.distanceBetween(me.latitude, me.longitude, lat, lon);
+      a.bearingDegrees = LocationService.bearingBetween(me.latitude, me.longitude, lat, lon);
+    }
+  }
+
+  AlertRecord? _findAlert(int msgId) {
+    for (final a in alerts) {
+      if (a.msgId == msgId) return a;
+    }
+    return null;
+  }
+
+  /// Files an alert into the queue. [mine] marks an alert this phone sent —
+  /// stored too, because the sender needs somewhere for an incoming ACK to
+  /// land: without a row of their own, "someone is responding" has nothing
+  /// to attach to.
+  Future<void> _recordAlert(MeshPacket packet, {required bool mine}) async {
+    final detail = _lostDetails[packet.msgId];
+    final loc = _alertLocations[packet.msgId];
+    final record = AlertRecord(
+      msgId: packet.msgId,
+      category: packet.category,
+      senderLabel: packet.senderLabel,
+      senderName: mine ? null : nameFor(packet.senderLabel),
+      groupTag: packet.groupTag,
+      receivedAt: DateTime.now(),
+      hops: mine ? 0 : kDefaultTtl - packet.ttl,
+      mine: mine,
+      lostName: detail?.name,
+      lostAge: detail?.age,
+      latitude: loc?.latitude,
+      longitude: loc?.longitude,
+    );
+    try {
+      await AlertsDb.insertIfNew(record);
+      await loadAlerts();
+    } catch (e) {
+      appendLog('Could not file this alert into the queue: $e', 'Warning');
+    }
+  }
+
+  /// Claims an alert: "I am responding to this." Puts an ACK on the air so
+  /// the person who sent it learns help is coming, and so other volunteers
+  /// see it as taken rather than converging on it too.
+  Future<void> claimAlert(AlertRecord alert) async {
+    final now = DateTime.now();
+    try {
+      await AlertsDb.setClaim(alert.msgId, deviceLabel, now);
+      await loadAlerts();
+    } catch (e) {
+      appendLog('Could not record your response: $e', 'Warning');
+      return;
+    }
+
+    final ack = AckPacket(msgId: alert.msgId, responderMeshId: deviceLabel);
+    if (peripheralSupported && bluetoothOn) {
+      _queueBroadcast('ack:${alert.msgId}', ack.encode(), kResponseAirtime,
+          priority: kPriorityAlert);
+      appendLog('Responding to #${alert.msgId} — telling the sender help is coming', 'Sent');
+    } else {
+      // The claim still stands locally. It has to: a volunteer on a phone
+      // that cannot advertise is still a volunteer walking towards someone,
+      // and their own queue must reflect that even if nobody else hears it.
+      appendLog(
+        'Responding to #${alert.msgId} — but this phone cannot broadcast, '
+        'so the sender will not be told',
+        'Warning',
+      );
+    }
+  }
+
+  /// Closes an alert and broadcasts that it's closed, which is what stops
+  /// the search — and, for a missing child, is the whole point of the app.
+  Future<void> resolveAlert(AlertRecord alert, {int reason = kResolveFound}) async {
+    final now = DateTime.now();
+    try {
+      await AlertsDb.setResolved(alert.msgId, deviceLabel, reason, now);
+      await loadAlerts();
+    } catch (e) {
+      appendLog('Could not close this alert: $e', 'Warning');
+      return;
+    }
+
+    // Stop spending airtime on an alert that is over — this is the other
+    // half of why RESOLVE exists. Both the alert and everything attached to
+    // it come off the air here.
+    _cancelBroadcast('alert:${alert.msgId}');
+    _cancelBroadcast('detail:${alert.msgId}');
+    _cancelBroadcast('loc:${alert.msgId}');
+
+    final packet = ResolvePacket(
+      msgId: alert.msgId,
+      resolverMeshId: deviceLabel,
+      reason: reason,
+    );
+    if (peripheralSupported && bluetoothOn) {
+      _queueBroadcast('res:${alert.msgId}', packet.encode(), kResponseAirtime,
+          priority: kPriorityAlert);
+      appendLog(
+        '${resolveReasonLabel(reason)} — #${alert.msgId} closed and nearby phones told',
+        'Sent',
+      );
+    } else {
+      appendLog('${resolveReasonLabel(reason)} — #${alert.msgId} closed on this phone only', 'Warning');
+    }
+  }
+
+  /// Closes the alert that was broadcast for a missing-person report, by
+  /// its msgId. This is what "Mark as found" reaches for: the report lives
+  /// in its own table with its own screen, but the thing still circulating
+  /// over the air is the alert, and only a RESOLVE stops it.
+  ///
+  /// Returns false when there is no alert to close — the report was never
+  /// broadcast, so there is nothing on the air and nothing to say.
+  Future<bool> resolveByMsgId(int msgId, {int reason = kResolveFound}) async {
+    final alert = _findAlert(msgId);
+    if (alert == null) return false;
+    if (alert.isResolved) return true;
+    await resolveAlert(alert, reason: reason);
+    return true;
+  }
+
+  /// Puts a closed alert back in the queue. A RESOLVE is an unsigned claim
+  /// from an unauthenticated radio (see kResolvePacketType); a volunteer who
+  /// knows better must be able to overrule it.
+  Future<void> reopenAlert(AlertRecord alert) async {
+    try {
+      await AlertsDb.reopen(alert.msgId);
+      await loadAlerts();
+      appendLog('Reopened #${alert.msgId} — back in the queue', 'Received');
+    } catch (e) {
+      appendLog('Could not reopen this alert: $e', 'Warning');
+    }
+  }
+
+  Future<void> _handleAck(AckPacket ack) async {
+    if (ack.responderMeshId == deviceLabel) return; // our own, echoed back
+
+    final existing = _findAlert(ack.msgId);
+    // An ACK for an alert we've never seen is not noise worth acting on: we
+    // have nothing to attach it to and no way to display it. It is still
+    // relayed below, because the phone that DOES need it may be a hop away.
+    if (existing != null && existing.claimedBy == null) {
+      try {
+        await AlertsDb.setClaim(ack.msgId, ack.responderMeshId, DateTime.now());
+        await loadAlerts();
+      } catch (e) {
+        appendLog('Could not record the response to #${ack.msgId}: $e', 'Warning');
+      }
+
+      final who = nameFor(ack.responderMeshId) ?? ack.responderMeshId;
+      if (existing.mine) {
+        // The single most reassuring thing this app can say. It gets a real
+        // notification, because the person who pressed SOS has very likely
+        // put their phone down or is holding it at their side.
+        appendLog('$who is responding to your alert', 'Received');
+        try {
+          await NotificationService.showResponderComing(who);
+        } catch (_) {
+          // A missing notification must not lose the claim itself.
+        }
+      } else {
+        appendLog('$who has taken #${ack.msgId}', 'Received');
+      }
+    }
+
+    _relayResponse('ack:${ack.msgId}', ack.encode());
+  }
+
+  Future<void> _handleResolve(ResolvePacket res) async {
+    if (res.resolverMeshId == deviceLabel) return; // our own, echoed back
+
+    final existing = _findAlert(res.msgId);
+    if (existing != null && !existing.isResolved) {
+      try {
+        await AlertsDb.setResolved(
+            res.msgId, res.resolverMeshId, res.reason, DateTime.now());
+        await loadAlerts();
+      } catch (e) {
+        appendLog('Could not close #${res.msgId}: $e', 'Warning');
+      }
+
+      // Stop carrying an alert whose search is over. This is what keeps a
+      // found child's beacon from circulating for the rest of the day.
+      _cancelBroadcast('alert:${res.msgId}');
+      _cancelBroadcast('detail:${res.msgId}');
+      _cancelBroadcast('loc:${res.msgId}');
+
+      final who = nameFor(res.resolverMeshId) ?? res.resolverMeshId;
+      appendLog('${resolveReasonLabel(res.reason)}: #${res.msgId} closed by $who', 'Received');
+
+      // Pull the alert off the in-app overlay too — leaving a full-screen
+      // "someone needs help" over a resolved alert is actively misleading.
+      pendingAlerts.removeWhere((a) => a.packet.msgId == res.msgId);
+      notifyListeners();
+    }
+
+    _relayResponse('res:${res.msgId}', res.encode());
+  }
+
+  /// Passes a response packet on once, for the same reasons an alert is
+  /// relayed: the sender may be one hop further away than the responder.
+  ///
+  /// Neither packet carries a TTL — there is no room, and none is needed:
+  /// [_relayedResponses] makes each phone re-air a given response exactly
+  /// once ever, which bounds the flood without a hop counter. The same
+  /// trick the text fragments use (see _relayFragment).
+  void _relayResponse(String key, Uint8List bytes) {
+    if (!_relayedResponses.add(key)) return;
+    if (!peripheralSupported || !bluetoothOn) return;
+    _queueBroadcast(key, bytes, kResponseAirtime, priority: kPriorityAlert);
   }
 
   void _handleLocation(LocationPacket loc) {
     _alertLocations[loc.msgId] = loc;
+
+    if (_findAlert(loc.msgId) != null) {
+      unawaited(() async {
+        try {
+          await AlertsDb.setLocation(loc.msgId, loc.latitude, loc.longitude);
+          await loadAlerts();
+        } catch (_) {
+          // Same as the detail packet: losing this costs a distance on the
+          // queue card, never the alert itself.
+        }
+      }());
+    }
     appendLog(
       'Position received for alert #${loc.msgId}',
       'Received',
@@ -831,7 +1243,20 @@ class MeshService extends ChangeNotifier {
   ///
   /// Unlike an alert there is no cooldown: rate-limiting a conversation
   /// would make it unusable, and text already yields the radio to any alert.
-  Future<bool> sendText(String body, {bool announcement = false}) async {
+  /// [airtime] is how long the message keeps repeating on the radio. Chat
+  /// takes the default 40s — long enough for a phone in a pocket to catch
+  /// it. An advisory can ask for much longer, and should: a route change
+  /// matters to the people who will walk past this camp in the next ten
+  /// minutes, not only to whoever happened to be in range at the instant a
+  /// volunteer hit send. Extending airtime is the right way to do that —
+  /// one message, one msgId, re-aired — rather than sending the same text
+  /// repeatedly, which would dedup as several different messages on every
+  /// receiving phone and fill their chat with copies.
+  Future<bool> sendText(
+    String body, {
+    bool announcement = false,
+    Duration? airtime,
+  }) async {
     final text = body.trim();
     if (text.isEmpty) return false;
 
@@ -863,10 +1288,12 @@ class MeshService extends ChangeNotifier {
       return false;
     }
 
-    _airText(fragments.head, fragments.parts, kTextAirtime);
+    _airText(fragments.head, fragments.parts, airtime ?? kTextAirtime);
     appendLog(
       announcement
-          ? 'Advisory sent to everyone in range (${fragments.parts.length + 1} fragments)'
+          ? 'Advisory sent to everyone in range for '
+              '${(airtime ?? kTextAirtime).inMinutes < 1 ? '${(airtime ?? kTextAirtime).inSeconds}s' : '${(airtime ?? kTextAirtime).inMinutes} min'} '
+              '(${fragments.parts.length + 1} fragments)'
           : 'Message sent to your Dindi (${fragments.parts.length + 1} fragments)',
       'Sent',
     );
@@ -1020,6 +1447,20 @@ class MeshService extends ChangeNotifier {
 
   void _handleLostDetail(LostPersonDetailPacket detail) {
     _lostDetails[detail.msgId] = detail;
+
+    // The queue row may already exist (the alert landed first) — give it the
+    // name, or it stays a "lost person" card with nobody to look for.
+    if (_findAlert(detail.msgId) != null) {
+      unawaited(() async {
+        try {
+          await AlertsDb.setLostDetail(detail.msgId, detail.name, detail.age);
+          await loadAlerts();
+        } catch (_) {
+          // The in-memory path below still works; a failed write here only
+          // costs the name after a restart.
+        }
+      }());
+    }
     // The detail can arrive after its alert is already on screen — fill it
     // in so the open alert gains the name instead of staying generic.
     var changed = false;
@@ -1090,6 +1531,17 @@ class MeshService extends ChangeNotifier {
       pendingAlerts.add(alert);
       notifyListeners();
     }
+
+    // Filed for every received alert, prominent or not: the notification
+    // tier decides whether to interrupt someone, and must not decide whether
+    // the alert exists at all — a volunteer scrolling their queue should
+    // still find the quiet ones.
+    //
+    // Deliberately AFTER the notification and deliberately not awaited. This
+    // writes a row and then re-reads the whole queue, and nothing about
+    // filing paperwork should sit between an incoming SOS and the buzz in
+    // someone's pocket.
+    unawaited(_recordAlert(packet, mine: false));
 
     if (packet.ttl > 0) {
       // Random jitter before relaying so nearby phones that all heard the
@@ -1199,6 +1651,15 @@ class MeshService extends ChangeNotifier {
       'Sent ${categoryLabel(category)} (msg #${packet.msgId}, TTL ${packet.ttl})',
       'Sent',
     );
+
+    // Our own alerts go in the queue too — that row is where an incoming
+    // ACK lands, and it's what lets this phone's own screen change from
+    // "alert sent" to "someone is responding".
+    if (lostName != null && lostName.isNotEmpty) {
+      _lostDetails[packet.msgId] =
+          LostPersonDetailPacket(msgId: packet.msgId, name: lostName, age: lostAge ?? '');
+    }
+    await _recordAlert(packet, mine: true);
 
     return packet;
   }

@@ -8,10 +8,171 @@
 // can't drift apart again.
 import 'package:flutter/material.dart';
 
+import '../mesh_service.dart';
 import '../models.dart';
 import '../theme.dart';
 import 'dindi_picker.dart';
 
+/// Help points heard right now — the volunteer-side feature seen from the
+/// pilgrim's side.
+///
+/// There is no distance and no arrow here, and that is deliberate rather
+/// than unfinished. A presence beacon carries no position (see HelpPoint in
+/// mesh_service.dart); what stands in for a distance is the physics of the
+/// radio. BLE advertising reaches tens of metres in a dense crowd, so
+/// hearing this beacon at all means the tent is close enough to walk to.
+/// "In range" is the honest claim, and inventing a direction the packet
+/// does not contain would send someone the wrong way.
+class HelpPointsCard extends StatelessWidget {
+  final List<HelpPoint> points;
+  const HelpPointsCard({super.key, required this.points});
+
+  static const Map<int, IconData> _icons = {
+    kStationMedical: Icons.medical_services,
+    kStationWater: Icons.water_drop,
+    kStationFood: Icons.restaurant,
+    kStationLostChildDesk: Icons.child_care,
+    kStationPolice: Icons.local_police,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    if (points.isEmpty) return const SizedBox.shrink();
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.volunteer_activism, color: AppColors.relayed, size: 20),
+                const SizedBox(width: 10),
+                Text(
+                  points.length == 1 ? 'Help is nearby' : '${points.length} help points nearby',
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Close enough for your phone to hear them.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: muted),
+            ),
+            const SizedBox(height: 12),
+            for (final point in points) ...[
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 16,
+                    backgroundColor: AppColors.relayed.withValues(alpha: 0.12),
+                    child: Icon(
+                      _icons[point.station] ?? Icons.help_outline,
+                      size: 17,
+                      color: AppColors.relayed,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(point.label, style: const TextStyle(fontWeight: FontWeight.w700)),
+                        Text(
+                          point.name.isEmpty
+                              ? point.freshnessLabel
+                              : '${point.name} · ${point.freshnessLabel}',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: muted),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              if (point != points.last) const SizedBox(height: 12),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// What happened to the alert you sent.
+///
+/// Before ACK packets existed, pressing SOS ended in a confirmation screen
+/// and then silence — the app could tell you your alert had gone out, and
+/// nothing whatsoever about whether it reached a human. This card is the
+/// other end of that: it turns "sent" into "Sunita is responding", which is
+/// the difference between a broadcast and being answered.
+class MyAlertCard extends StatelessWidget {
+  final AlertRecord alert;
+  final String Function(String) nameFor;
+
+  const MyAlertCard({super.key, required this.alert, required this.nameFor});
+
+  @override
+  Widget build(BuildContext context) {
+    final answered = alert.isClaimed || alert.isResolved;
+    final color = alert.isResolved
+        ? AppColors.relayed
+        : (answered ? AppColors.relayed : AppColors.warning);
+
+    final String headline;
+    final String detail;
+    if (alert.isResolved) {
+      headline = 'Closed';
+      detail = '${resolveReasonLabel(alert.resolvedReason ?? kResolveHandled)}'
+          ' — your ${alert.title.toLowerCase()} from ${alert.ageLabel} is finished.';
+    } else if (alert.isClaimed) {
+      headline = 'Help is coming';
+      detail = '${nameFor(alert.claimedBy!)} is responding to your '
+          '${alert.title.toLowerCase()}.';
+    } else {
+      headline = 'Your alert is out';
+      detail = 'Sent ${alert.ageLabel}. Nearby phones are passing it on. '
+          'You will be told the moment someone responds.';
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            alert.isResolved
+                ? Icons.check_circle
+                : (answered ? Icons.directions_run : Icons.podcasts),
+            color: color,
+            size: 26,
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  headline,
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: color),
+                ),
+                const SizedBox(height: 4),
+                Text(detail, style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 /// Shows the warkari's current Dindi (or an invite to set one) and its live
 /// headcount (via presence beacons — see MeshService.dindiHeadcount).
 ///
