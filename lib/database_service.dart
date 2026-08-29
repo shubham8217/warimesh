@@ -16,7 +16,7 @@ import 'models.dart';
 
 class AppDatabase {
   static Database? _db;
-  static const int _version = 10;
+  static const int _version = 11;
 
   /// The database filename. A constant in the app; overridable only so that
   /// test files can each own their own file.
@@ -104,6 +104,24 @@ class AppDatabase {
             'INTEGER NOT NULL DEFAULT 0',
           );
         }
+        if (oldVersion < 11) {
+          // What kind of emergency an SOS is (see kSosReason* in
+          // models.dart), and the sighting state of a missing-person search
+          // (see kSpottedPacketType). reason defaults to
+          // kSosReasonUnspecified so every alert already on this phone stays
+          // exactly what it was — an SOS that didn't say why — rather than
+          // being retroactively relabelled as some category nobody chose.
+          await _addColumnIfMissing(
+            db,
+            'alerts',
+            'reason',
+            'INTEGER NOT NULL DEFAULT $kSosReasonUnspecified',
+          );
+          await _addColumnIfMissing(db, 'alerts', 'spotted_by', 'TEXT');
+          await _addColumnIfMissing(db, 'alerts', 'spotted_at', 'INTEGER');
+          await _addColumnIfMissing(db, 'alerts', 'spotted_lat', 'REAL');
+          await _addColumnIfMissing(db, 'alerts', 'spotted_lon', 'REAL');
+        }
       },
     );
     return _db!;
@@ -167,7 +185,17 @@ class AppDatabase {
         claimed_at INTEGER,
         resolved_by TEXT,
         resolved_reason INTEGER,
-        resolved_at INTEGER
+        resolved_at INTEGER,
+        -- Kept in step with the v11 ALTERs in onUpgrade. Every column added
+        -- by a migration has to be added here too, or a fresh install and an
+        -- upgraded install end up with different tables — and the fresh one
+        -- breaks, which is the case that gets tested least. See
+        -- database_test.dart, which exists because exactly that happened.
+        reason INTEGER NOT NULL DEFAULT 0,
+        spotted_by TEXT,
+        spotted_at INTEGER,
+        spotted_lat REAL,
+        spotted_lon REAL
       )
     """);
   }
@@ -405,6 +433,36 @@ class AlertsDb {
         'resolved_by': meshId,
         'resolved_reason': reason,
         'resolved_at': at.millisecondsSinceEpoch,
+      },
+      where: 'msg_id = ?',
+      whereArgs: [msgId],
+    );
+  }
+
+  /// Records a sighting of a missing person (see kSpottedPacketType).
+  ///
+  /// Unlike [setClaim], a later sighting deliberately DOES overwrite an
+  /// earlier one — the newest sighting is the useful one, because the whole
+  /// point is tracking someone who is moving. This is the opposite rule to a
+  /// claim, where the first responder heard is the one that stands.
+  ///
+  /// Never touches latitude/longitude: those are where the report was filed
+  /// from, which the search is working back from. See AlertRecord.spottedBy.
+  static Future<void> setSpotted(
+    int msgId,
+    String meshId,
+    DateTime at, {
+    double? latitude,
+    double? longitude,
+  }) async {
+    final db = await AppDatabase.instance;
+    await db.update(
+      'alerts',
+      {
+        'spotted_by': meshId,
+        'spotted_at': at.millisecondsSinceEpoch,
+        'spotted_lat': latitude,
+        'spotted_lon': longitude,
       },
       where: 'msg_id = ?',
       whereArgs: [msgId],

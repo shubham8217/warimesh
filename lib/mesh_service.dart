@@ -276,6 +276,29 @@ class MeshService extends ChangeNotifier {
   /// close. Null when this phone isn't currently a help point.
   int? _myActiveHelpPointMsgId;
 
+  /// Seva worth offering someone in a given kind of emergency — the SOS →
+  /// Seva bridge. Purely a filter over help points this phone has ALREADY
+  /// heard announced through the mesh (see [activeHelpPoints]): it asks the
+  /// network for nothing, and a help point that has not announced itself
+  /// simply does not exist here. An empty list is a completely normal
+  /// answer and the UI shows nothing rather than a placeholder.
+  ///
+  /// Ordered by how relevant the station is to the reason (see
+  /// sevaStationsForReason), then freshest first inside each kind — a water
+  /// point heard 30 seconds ago is worth more than one heard 20 minutes ago.
+  List<HelpPointRecord> sevaForReason(int reason) {
+    final wanted = sevaStationsForReason(reason);
+    if (wanted.isEmpty) return const [];
+    final active = activeHelpPoints;
+    final matched = <HelpPointRecord>[];
+    for (final station in wanted) {
+      final ofKind = active.where((h) => h.helpType == station).toList()
+        ..sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
+      matched.addAll(ofKind);
+    }
+    return matched;
+  }
+
   static int _byTriage(AlertRecord a, AlertRecord b) {
     final rank = a.triageRank.compareTo(b.triageRank);
     if (rank != 0) return rank;
@@ -1209,6 +1232,12 @@ class MeshService extends ChangeNotifier {
         continue;
       }
 
+      if (data[0] == kSpottedPacketType) {
+        final spot = SpottedPacket.decode(data);
+        if (spot != null) unawaited(_handleSpotted(spot));
+        continue;
+      }
+
       if (data[0] == kHelpPointPacketType) {
         final hp = HelpPointPacket.decode(data);
         if (hp != null) unawaited(_handleHelpPointPacket(hp));
@@ -1311,6 +1340,7 @@ class MeshService extends ChangeNotifier {
       receivedAt: DateTime.now(),
       hops: mine ? 0 : kDefaultTtl - packet.ttl,
       mine: mine,
+      reason: packet.reason,
       lostName: detail?.name,
       lostAge: detail?.age,
       latitude: loc?.latitude,
@@ -1433,6 +1463,112 @@ class MeshService extends ChangeNotifier {
     } catch (e) {
       appendLog('Could not reopen this alert: $e', 'Warning');
     }
+  }
+
+  /// "I have just seen this person, here." Reports a sighting of a missing
+  /// person and puts it on the air so the people searching — above all the
+  /// reporter and their Dindi Lead — learn where the trail is now.
+  ///
+  /// Deliberately does NOT claim the alert (see the note on
+  /// kSpottedPacketType): the person reporting a sighting is usually walking
+  /// on, and the case must stay open for someone who can actually go.
+  Future<void> reportSpotted(AlertRecord alert) async {
+    final now = DateTime.now();
+    // The cached fix, never a blocking wait for GPS — same rule as sending
+    // an alert (see _broadcastLocationFor). A sighting reported thirty
+    // seconds late because the radio was warming up is a sighting of where
+    // they no longer are.
+    final me = location.lastKnown;
+
+    try {
+      await AlertsDb.setSpotted(
+        alert.msgId,
+        deviceLabel,
+        now,
+        latitude: me?.latitude,
+        longitude: me?.longitude,
+      );
+      await loadAlerts();
+    } catch (e) {
+      appendLog('Could not record the sighting: $e', 'Warning');
+      return;
+    }
+
+    final packet = SpottedPacket(
+      msgId: alert.msgId,
+      spotterMeshId: deviceLabel,
+      latitude: me?.latitude,
+      longitude: me?.longitude,
+    );
+    if (peripheralSupported && bluetoothOn) {
+      _queueBroadcast(
+        'spot:${alert.msgId}',
+        packet.encode(),
+        kResponseAirtime,
+        priority: kPriorityAlert,
+      );
+      appendLog(
+        me == null
+            ? 'Sighting reported for #${alert.msgId} — no position on this phone to send with it'
+            : 'Sighting reported for #${alert.msgId} — position sent with it',
+        'Sent',
+      );
+    } else {
+      appendLog(
+        'Sighting recorded for #${alert.msgId} on this phone only — cannot broadcast',
+        'Warning',
+      );
+    }
+  }
+
+  Future<void> _handleSpotted(SpottedPacket spot) async {
+    if (spot.spotterMeshId == deviceLabel) return; // our own, echoed back
+
+    final existing = _findAlert(spot.msgId);
+    // Like an ACK, a sighting for a case we have never heard of has nothing
+    // to attach to — but it is still relayed below, because the phone that
+    // filed the report may be a hop further out.
+    if (existing != null && !existing.isResolved) {
+      try {
+        await AlertsDb.setSpotted(
+          spot.msgId,
+          spot.spotterMeshId,
+          DateTime.now(),
+          latitude: spot.latitude,
+          longitude: spot.longitude,
+        );
+        await loadAlerts();
+      } catch (e) {
+        appendLog(
+          'Could not record the sighting of #${spot.msgId}: $e',
+          'Warning',
+        );
+      }
+
+      final who = nameFor(spot.spotterMeshId) ?? spot.spotterMeshId;
+      appendLog(
+        spot.hasLocation
+            ? '$who reported seeing the missing person from #${spot.msgId}, with a position'
+            : '$who reported seeing the missing person from #${spot.msgId}',
+        'Received',
+      );
+
+      if (existing.mine) {
+        // The person who filed the report needs to be told the moment
+        // somebody lays eyes on who they are looking for — they have very
+        // likely put the phone in a pocket and started walking.
+        try {
+          await NotificationService.showPersonSpotted(
+            who,
+            lostName: existing.lostName,
+          );
+        } catch (_) {
+          // A missing notification must not lose the sighting itself.
+        }
+      }
+    }
+
+    _relayResponse('spot:${spot.msgId}', spot.encode());
   }
 
   Future<void> _handleAck(AckPacket ack) async {
@@ -2004,8 +2140,11 @@ class MeshService extends ChangeNotifier {
     final prominent =
         packet.category == kCategorySos || isMyDindi || isResponder;
 
+    final what = sosReasonIsSpecific(packet.reason)
+        ? '${sosReasonLabel(packet.reason)} SOS'
+        : categoryLabel(packet.category);
     appendLog(
-      'Received ${categoryLabel(packet.category)} from ${packet.senderLabel}'
+      'Received $what from ${packet.senderLabel}'
           '${isMyDindi ? ' (your Dindi)' : ''} (TTL ${packet.ttl})',
       'Received',
     );
@@ -2141,6 +2280,7 @@ class MeshService extends ChangeNotifier {
     int category, {
     String? lostName,
     String? lostAge,
+    int reason = kSosReasonUnspecified,
   }) async {
     if (onCooldown) {
       appendLog(
@@ -2159,6 +2299,9 @@ class MeshService extends ChangeNotifier {
       category: category,
       senderLabel: deviceLabel,
       groupTag: _myGroupTag,
+      // Only an SOS carries a reason. A Lost Person alert's "what" is the
+      // person, not a reason code — see MeshPacket.reason.
+      reason: category == kCategorySos ? reason : kSosReasonUnspecified,
     );
     // Mark our own send as seen so a stray echo of our own advertisement
     // isn't treated as a fresh incoming alert.
@@ -2186,10 +2329,10 @@ class MeshService extends ChangeNotifier {
       );
     }
 
-    appendLog(
-      'Sent ${categoryLabel(category)} (msg #${packet.msgId}, TTL ${packet.ttl})',
-      'Sent',
-    );
+    final what = sosReasonIsSpecific(packet.reason)
+        ? '${sosReasonLabel(packet.reason)} SOS'
+        : categoryLabel(category);
+    appendLog('Sent $what (msg #${packet.msgId}, TTL ${packet.ttl})', 'Sent');
 
     // Our own alerts go in the queue too — that row is where an incoming
     // ACK lands, and it's what lets this phone's own screen change from

@@ -18,14 +18,17 @@ class NotificationService {
     await _plugin.initialize(
       settings: const InitializationSettings(android: androidInit),
     );
-    final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
+    final androidPlugin = _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
     await androidPlugin?.requestNotificationsPermission();
     await androidPlugin?.createNotificationChannel(
       const AndroidNotificationChannel(
         _channelId,
         'Mesh alerts',
-        description: 'Fires when this phone receives an SOS or Lost Person alert over the mesh',
+        description:
+            'Fires when this phone receives an SOS or Lost Person alert over the mesh',
         importance: Importance.max,
         playSound: true,
         enableVibration: true,
@@ -60,6 +63,7 @@ class NotificationService {
   }) async {
     final isSos = packet.category == kCategorySos;
     final from = senderName ?? packet.senderLabel;
+    final reason = packet.reason;
 
     // "240 m away to your north-east" is the difference between an alert
     // someone can act on and one they can only feel bad about. Built here
@@ -68,11 +72,16 @@ class NotificationService {
     final where = distanceLabel == null
         ? ''
         : directionLabel == null
-            ? ' — $distanceLabel'
-            : ' — $distanceLabel, to your $directionLabel';
+        ? ' — $distanceLabel'
+        : ' — $distanceLabel, to your $directionLabel';
 
     final String body;
-    if (isSos) {
+    if (isSos && reason != null && sosReasonIsSpecific(reason)) {
+      // The reason is the whole point of putting it on the lock screen:
+      // "Rahul needs help" tells a volunteer to go, "Rahul — Medical" tells
+      // them what to bring. See kSosReason* in models.dart.
+      body = '$from — ${sosReasonLabel(reason)}$where';
+    } else if (isSos) {
       body = '$from needs help$where';
     } else if (lostName != null && lostName.isNotEmpty) {
       final age = (lostAge == null || lostAge.isEmpty) ? '' : ', age $lostAge';
@@ -85,13 +94,18 @@ class NotificationService {
       // Notification IDs are 32-bit on the Android side; msgId is a uint32
       // and can exceed that, so fold it down instead of passing it raw.
       id: packet.msgId % 100000,
-      title: isSos ? '🆘 SOS RECEIVED' : '🔎 Missing person nearby',
+      title: !isSos
+          ? '🔎 Missing person nearby'
+          : sosReasonIsSpecific(reason)
+          ? '${sosReasonEmoji(reason)} ${sosReasonLabel(reason).toUpperCase()} SOS'
+          : '🆘 SOS RECEIVED',
       body: body,
       notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
           'Mesh alerts',
-          channelDescription: 'Fires when this phone receives an SOS or Lost Person alert over the mesh',
+          channelDescription:
+              'Fires when this phone receives an SOS or Lost Person alert over the mesh',
           importance: Importance.max,
           priority: Priority.max,
           // An update re-posts the same notification id to add the distance
@@ -110,7 +124,9 @@ class NotificationService {
           // before anyone reads it; public visibility shows the text on the
           // lock screen instead of hiding it behind "1 new notification".
           fullScreenIntent: isSos,
-          category: isSos ? AndroidNotificationCategory.alarm : AndroidNotificationCategory.message,
+          category: isSos
+              ? AndroidNotificationCategory.alarm
+              : AndroidNotificationCategory.message,
           visibility: NotificationVisibility.public,
           ongoing: isSos,
           autoCancel: !isSos,
@@ -169,7 +185,42 @@ class NotificationService {
         android: AndroidNotificationDetails(
           _channelId,
           'Mesh alerts',
-          channelDescription: 'Fires when this phone receives an SOS or Lost Person alert over the mesh',
+          channelDescription:
+              'Fires when this phone receives an SOS or Lost Person alert over the mesh',
+          importance: Importance.max,
+          priority: Priority.high,
+          playSound: true,
+          enableVibration: true,
+          visibility: NotificationVisibility.public,
+          autoCancel: true,
+        ),
+      ),
+    );
+  }
+
+  /// Fires on the phone that reported someone missing, the moment anybody
+  /// on the mesh reports laying eyes on them — see kSpottedPacketType.
+  ///
+  /// Like [showResponderComing] this is worth interrupting for because of
+  /// who receives it: somebody who has been walking a route looking for a
+  /// child. Also like it, this is dismissible — it is news, not a summons.
+  static Future<void> showPersonSpotted(String who, {String? lostName}) async {
+    final subject = (lostName == null || lostName.isEmpty)
+        ? 'the person you reported missing'
+        : lostName;
+    await _plugin.show(
+      // Its own fixed id, next to showResponderComing's, so a sighting
+      // replaces the previous sighting rather than stacking and can never
+      // collide with an alert notification.
+      id: 900002,
+      title: '👀 Sighting reported',
+      body: '$who reported seeing $subject.',
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _channelId,
+          'Mesh alerts',
+          channelDescription:
+              'Fires when this phone receives an SOS or Lost Person alert over the mesh',
           importance: Importance.max,
           priority: Priority.high,
           playSound: true,
@@ -182,5 +233,12 @@ class NotificationService {
   }
 
   // Long-short-long-short — deliberately unlike a normal message buzz.
-  static final Int64List _sosVibration = Int64List.fromList([0, 600, 300, 600, 300, 600]);
+  static final Int64List _sosVibration = Int64List.fromList([
+    0,
+    600,
+    300,
+    600,
+    300,
+    600,
+  ]);
 }

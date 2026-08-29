@@ -396,6 +396,7 @@ void main() {
       int category = kCategorySos,
       String groupTag = 'AB',
       bool mine = false,
+      bool resolved = false,
     }) => AlertRecord(
       msgId: 1,
       category: category,
@@ -403,6 +404,7 @@ void main() {
       groupTag: groupTag,
       receivedAt: DateTime.now(),
       mine: mine,
+      resolvedAt: resolved ? DateTime.now() : null,
     );
 
     test('an SOS from the Lead\'s own Dindi qualifies', () {
@@ -413,20 +415,36 @@ void main() {
       expect(isDindiEmergency(makeAlert(groupTag: 'ZZ'), 'AB'), isFalse);
     });
 
-    test(
-      'a Lost Person report never appears here, even from the same Dindi',
-      () {
-        // Dindi Emergencies is specifically the SOS routing layer — Lost
-        // Person already has its own screen (missing_screen.dart).
-        expect(
-          isDindiEmergency(
-            makeAlert(category: kCategoryLostPerson, groupTag: 'AB'),
-            'AB',
-          ),
-          isFalse,
-        );
-      },
-    );
+    test('a missing person from the same Dindi also qualifies', () {
+      // Broadened deliberately: a Lead has to coordinate a search for one
+      // of their own people, not just an SOS. See isDindiEmergency's note.
+      expect(
+        isDindiEmergency(
+          makeAlert(category: kCategoryLostPerson, groupTag: 'AB'),
+          'AB',
+        ),
+        isTrue,
+      );
+    });
+
+    test('a missing person from a different Dindi does not', () {
+      expect(
+        isDindiEmergency(
+          makeAlert(category: kCategoryLostPerson, groupTag: 'ZZ'),
+          'AB',
+        ),
+        isFalse,
+      );
+    });
+
+    test('a resolved alert drops off the Lead\'s queue', () {
+      // The queue is what still needs coordinating; closed cases belong in
+      // history, not at the top of a home screen.
+      expect(
+        isDindiEmergency(makeAlert(groupTag: 'AB', resolved: true), 'AB'),
+        isFalse,
+      );
+    });
 
     test('this phone\'s own SOS never appears as something to coordinate', () {
       expect(
@@ -861,6 +879,362 @@ void main() {
       expect(restored.hops, 2);
       expect(restored.isLimited, isTrue);
       expect(restored.acknowledged, isTrue);
+    });
+  });
+
+  group('SOS reason on the wire', () {
+    MeshPacket sos(int reason) => MeshPacket(
+      ttl: kDefaultTtl,
+      msgId: 3141592653,
+      category: kCategorySos,
+      senderLabel: 'W7K2M9',
+      groupTag: 'AB',
+      reason: reason,
+    );
+
+    test('every reason survives select → encode → decode unchanged', () {
+      // The whole point of the feature: a medical emergency must never
+      // arrive as a generic SOS, and must never arrive as some other
+      // category.
+      for (final reason in kSosReasons) {
+        final decoded = MeshPacket.decode(sos(reason).encode())!;
+        expect(decoded.reason, reason, reason: sosReasonLabel(reason));
+        expect(decoded.category, kCategorySos);
+        expect(decoded.msgId, 3141592653);
+        expect(decoded.senderLabel, 'W7K2M9');
+        expect(decoded.groupTag, 'AB');
+      }
+    });
+
+    test('the alert packet still fits one advertisement at 16 bytes', () {
+      final bytes = sos(kSosReasonMedical).encode();
+      expect(bytes.length, kPacketFullLength);
+      expect(bytes.length, lessThanOrEqualTo(24));
+    });
+
+    test(
+      'a 15-byte alert from an older build still decodes, as unspecified',
+      () {
+        // The append-only guarantee that lets the reason byte ship without a
+        // flag day — see the note above kPacketFullLength. A phone that
+        // cannot be updated mid-Wari must not fall off the mesh, and its SOS
+        // must still be an SOS.
+        final legacy = sos(
+          kSosReasonMedical,
+        ).encode().sublist(0, kPacketLength);
+
+        final decoded = MeshPacket.decode(legacy)!;
+        expect(decoded.category, kCategorySos);
+        expect(decoded.senderLabel, 'W7K2M9');
+        expect(decoded.reason, kSosReasonUnspecified);
+        expect(sosReasonIsSpecific(decoded.reason), isFalse);
+      },
+    );
+
+    test('an unknown reason from a newer build degrades to unspecified', () {
+      // Direction of caution matters: an unrecognised code must read as "an
+      // SOS that didn't say why", never as some other category. Showing the
+      // wrong emergency type sends people with the wrong equipment.
+      final bytes = sos(kSosReasonMedical).encode();
+      bytes[kPacketLength] = 99;
+      expect(MeshPacket.decode(bytes)!.reason, kSosReasonUnspecified);
+    });
+
+    test('relaying preserves the reason along with everything else', () {
+      final relayed = sos(kSosReasonHeat).relayed();
+      expect(relayed.reason, kSosReasonHeat);
+      expect(relayed.ttl, kDefaultTtl - 1);
+      expect(relayed.msgId, 3141592653);
+      expect(relayed.category, kCategorySos);
+      // And it must survive the second encode/decode too — a two-hop relay
+      // is the whole demo.
+      final secondHop = MeshPacket.decode(relayed.encode())!;
+      expect(secondHop.reason, kSosReasonHeat);
+      expect(secondHop.ttl, kDefaultTtl - 1);
+    });
+
+    test('a Lost Person alert carries no reason', () {
+      final lost = MeshPacket(
+        ttl: 2,
+        msgId: 1,
+        category: kCategoryLostPerson,
+        senderLabel: 'W7K2M9',
+      );
+      expect(MeshPacket.decode(lost.encode())!.reason, kSosReasonUnspecified);
+    });
+
+    test('every reason has a distinct label and a glyph', () {
+      final labels = kSosReasons.map(sosReasonLabel).toSet();
+      expect(labels.length, kSosReasons.length);
+      for (final reason in kSosReasons) {
+        expect(sosReasonEmoji(reason), isNotEmpty);
+        expect(sosReasonIsSpecific(reason), isTrue);
+      }
+      // Unspecified is deliberately NOT "specific" — every piece of UI keys
+      // off this to avoid rendering "Emergency emergency".
+      expect(sosReasonIsSpecific(kSosReasonUnspecified), isFalse);
+    });
+  });
+
+  group('SOS reason priority and triage', () {
+    AlertRecord sosWith(int reason) => AlertRecord(
+      msgId: reason,
+      category: kCategorySos,
+      senderLabel: 'W7K2M9',
+      receivedAt: DateTime.now(),
+      reason: reason,
+    );
+
+    test('medical, child and safety are critical; heat and elderly high', () {
+      expect(sosReasonPriority(kSosReasonMedical), kSosPriorityCritical);
+      expect(sosReasonPriority(kSosReasonChild), kSosPriorityCritical);
+      expect(sosReasonPriority(kSosReasonSafety), kSosPriorityCritical);
+      expect(sosReasonPriority(kSosReasonHeat), kSosPriorityHigh);
+      expect(sosReasonPriority(kSosReasonElderly), kSosPriorityHigh);
+      expect(sosReasonPriority(kSosReasonLost), kSosPriorityNormal);
+      expect(sosReasonPriority(kSosReasonOther), kSosPriorityNormal);
+    });
+
+    test('a medical SOS sorts above a lost-and-separated one', () {
+      expect(
+        sosWith(kSosReasonMedical).triageRank,
+        lessThan(sosWith(kSosReasonLost).triageRank),
+      );
+    });
+
+    test(
+      'an SOS that did not say why still outranks every lost-person alert',
+      () {
+        // The band boundary that must not move. Priority reorders a list; it
+        // must never demote an SOS below a different kind of alert entirely.
+        final quietSos = sosWith(kSosReasonUnspecified);
+        final lostPerson = AlertRecord(
+          msgId: 99,
+          category: kCategoryLostPerson,
+          senderLabel: 'W7K2M9',
+          receivedAt: DateTime.now(),
+        );
+        expect(quietSos.triageRank, lessThan(lostPerson.triageRank));
+      },
+    );
+
+    test(
+      'an unclaimed low-priority SOS still outranks a claimed critical one',
+      () {
+        // Somebody is already going to the claimed one. The unanswered call
+        // is the one that needs a human, whatever it says.
+        final claimedMedical = sosWith(kSosReasonMedical)..claimedBy = 'V1AAAA';
+        expect(
+          sosWith(kSosReasonOther).triageRank,
+          lessThan(claimedMedical.triageRank),
+        );
+      },
+    );
+
+    test('headline names the emergency, or falls back cleanly', () {
+      expect(sosWith(kSosReasonMedical).headline, contains('Medical'));
+      expect(sosWith(kSosReasonMedical).headline, contains('SOS'));
+      expect(sosWith(kSosReasonUnspecified).headline, 'SOS');
+      expect(sosWith(kSosReasonUnspecified).reasonLabel, isNull);
+    });
+
+    test('reason survives a round-trip through the database map', () {
+      final restored = AlertRecord.fromMap(
+        sosWith(kSosReasonSafety).toMap().cast<String, Object?>(),
+      );
+      expect(restored.reason, kSosReasonSafety);
+      expect(restored.reasonLabel, 'Safety / Threat');
+    });
+
+    test('a row written before reasons existed reads as unspecified', () {
+      // What every alert already on a phone looks like after the v11
+      // migration: no reason column value at all.
+      final legacy = sosWith(kSosReasonMedical).toMap().cast<String, Object?>()
+        ..remove('reason');
+      expect(AlertRecord.fromMap(legacy).reason, kSosReasonUnspecified);
+    });
+  });
+
+  group('SOS → Seva mapping', () {
+    test('each reason maps to the stations that can actually help', () {
+      expect(
+        sevaStationsForReason(kSosReasonMedical),
+        containsAll([kStationMedical, kStationFirstAid]),
+      );
+      expect(
+        sevaStationsForReason(kSosReasonHeat),
+        containsAll([kStationWater, kStationMedical]),
+      );
+      expect(
+        sevaStationsForReason(kSosReasonChild),
+        containsAll([kStationLostChildDesk, kStationPolice]),
+      );
+      expect(sevaStationsForReason(kSosReasonSafety), [kStationPolice]);
+      expect(
+        sevaStationsForReason(kSosReasonLost),
+        containsAll([kStationPolice, kStationLostChildDesk]),
+      );
+      expect(
+        sevaStationsForReason(kSosReasonElderly),
+        contains(kStationMedical),
+      );
+    });
+
+    test('heat puts water first — rehydration before escalation', () {
+      expect(sevaStationsForReason(kSosReasonHeat).first, kStationWater);
+    });
+
+    test('a reason with nothing specific to offer recommends nothing', () {
+      // The no-false-recommendation rule. "Other" and an unspecified SOS
+      // must not produce a confident suggestion nobody asked for.
+      expect(sevaStationsForReason(kSosReasonOther), isEmpty);
+      expect(sevaStationsForReason(kSosReasonUnspecified), isEmpty);
+    });
+
+    test('no mapping ever suggests an irrelevant station', () {
+      // A medical emergency must never route somebody to a charging point.
+      expect(
+        sevaStationsForReason(kSosReasonMedical),
+        isNot(contains(kStationCharging)),
+      );
+      expect(
+        sevaStationsForReason(kSosReasonSafety),
+        isNot(contains(kStationFood)),
+      );
+    });
+  });
+
+  group('SpottedPacket — missing-person sightings', () {
+    test('round-trips a sighting with a position', () {
+      final packet = SpottedPacket(
+        msgId: 3141592653,
+        spotterMeshId: 'V7K2M9',
+        latitude: 17.679076,
+        longitude: 75.323997,
+      );
+      final bytes = packet.encode();
+      expect(bytes.length, kSpottedPacketLength);
+      expect(bytes.length, lessThanOrEqualTo(24));
+
+      final decoded = SpottedPacket.decode(bytes)!;
+      expect(decoded.msgId, 3141592653);
+      expect(decoded.spotterMeshId, 'V7K2M9');
+      expect(decoded.hasLocation, isTrue);
+      expect(decoded.latitude, closeTo(17.679076, 1e-6));
+      expect(decoded.longitude, closeTo(75.323997, 1e-6));
+    });
+
+    test('round-trips a sighting with no position, rather than faking one', () {
+      // A sighting without GPS is still enormously useful and must survive
+      // the wire as exactly that — never as coordinates of 0,0, which is in
+      // the Atlantic.
+      final packet = SpottedPacket(msgId: 42, spotterMeshId: 'W4B2XY');
+      final decoded = SpottedPacket.decode(packet.encode())!;
+      expect(decoded.hasLocation, isFalse);
+      expect(decoded.latitude, isNull);
+      expect(decoded.longitude, isNull);
+      expect(decoded.spotterMeshId, 'W4B2XY');
+    });
+
+    test('rejects coordinates that are not on Earth, keeping the sighting', () {
+      // Same guard as LocationPacket, but the failure mode is gentler: drop
+      // the garbage position, keep the fact that somebody saw them.
+      final bytes = SpottedPacket(
+        msgId: 1,
+        spotterMeshId: 'V1AAAA',
+        latitude: 0,
+        longitude: 0,
+      ).encode();
+      bytes[12] = 0x7F;
+      bytes[13] = 0xFF;
+
+      final decoded = SpottedPacket.decode(bytes)!;
+      expect(decoded.hasLocation, isFalse);
+      expect(decoded.spotterMeshId, 'V1AAAA');
+    });
+
+    test('a blank spotter id is rejected rather than attributed to nobody', () {
+      final bytes = SpottedPacket(msgId: 7, spotterMeshId: '      ').encode();
+      expect(SpottedPacket.decode(bytes), isNull);
+    });
+
+    test('rejects other packet types and anything truncated', () {
+      final ack = AckPacket(msgId: 7, responderMeshId: 'V11111').encode();
+      expect(SpottedPacket.decode(ack), isNull);
+      expect(
+        AckPacket.decode(
+          SpottedPacket(msgId: 7, spotterMeshId: 'V11111').encode(),
+        ),
+        isNull,
+      );
+      final short = SpottedPacket(
+        msgId: 1,
+        spotterMeshId: 'V1AAAA',
+      ).encode().sublist(0, kSpottedPacketLength - 1);
+      expect(SpottedPacket.decode(short), isNull);
+    });
+
+    test(
+      'a sighting never collides with the report location on the record',
+      () {
+        // The rule that keeps a search usable: a sighting is a second, later
+        // point, not a correction of where the report was filed from.
+        final alert =
+            AlertRecord(
+                msgId: 1,
+                category: kCategoryLostPerson,
+                senderLabel: 'W7K2M9',
+                receivedAt: DateTime.now(),
+                latitude: 17.6,
+                longitude: 75.3,
+              )
+              ..spottedBy = 'V4B2XY'
+              ..spottedAt = DateTime.now()
+              ..spottedLatitude = 18.5
+              ..spottedLongitude = 73.8;
+
+        expect(alert.latitude, 17.6);
+        expect(alert.spottedLatitude, 18.5);
+        expect(alert.isSpotted, isTrue);
+        expect(alert.hasSpottedLocation, isTrue);
+      },
+    );
+
+    test('a resolved case is no longer "spotted" — found beats seen', () {
+      final alert =
+          AlertRecord(
+              msgId: 1,
+              category: kCategoryLostPerson,
+              senderLabel: 'W7K2M9',
+              receivedAt: DateTime.now(),
+            )
+            ..spottedBy = 'V4B2XY'
+            ..spottedAt = DateTime.now()
+            ..resolvedAt = DateTime.now();
+
+      expect(alert.isSpotted, isFalse);
+      expect(alert.isResolved, isTrue);
+    });
+
+    test('sighting state survives a round-trip through the database map', () {
+      final original =
+          AlertRecord(
+              msgId: 55,
+              category: kCategoryLostPerson,
+              senderLabel: 'W7K2M9',
+              receivedAt: DateTime.now(),
+            )
+            ..spottedBy = 'V4B2XY'
+            ..spottedAt = DateTime.now()
+            ..spottedLatitude = 18.5
+            ..spottedLongitude = 73.85;
+
+      final restored = AlertRecord.fromMap(
+        original.toMap().cast<String, Object?>(),
+      );
+      expect(restored.spottedBy, 'V4B2XY');
+      expect(restored.isSpotted, isTrue);
+      expect(restored.spottedLatitude, closeTo(18.5, 1e-9));
     });
   });
 }

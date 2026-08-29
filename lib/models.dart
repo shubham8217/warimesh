@@ -36,6 +36,128 @@ const int kPacketLength = 15;
 const int kCategorySos = 0;
 const int kCategoryLostPerson = 1;
 
+// SOS REASON — "what is actually wrong", appended as a 16th byte.
+//
+// Until now an SOS said only "someone needs help". On the Wari that is
+// barely actionable: a volunteer running to a heat-stroke case brings water,
+// one running to a lost child brings a police escort, and the two are not
+// interchangeable. The reason is what turns a siren into an instruction.
+//
+// It rides as ONE APPENDED BYTE rather than by borrowing spare values in the
+// existing `category` byte, and that choice matters. `category` is read as a
+// binary (see categoryLabel: `category == kCategorySos ? 'SOS' : 'Lost
+// Person'`), so a phone running an older build that met category 0x13 would
+// confidently render a medical SOS as a missing-person report — worse than
+// showing no reason at all. Appending instead means an older phone reads the
+// first 15 bytes exactly as it always did and simply never learns the
+// reason, while a newer phone reading an older 15-byte packet decodes
+// kSosReasonUnspecified. Same append-only, read-by-length growth the
+// presence beacon has now done twice (see kPresenceFullLength); it is the
+// only kind of protocol change that is safe against devices you cannot
+// update mid-Wari.
+const int kPacketFullLength = 16;
+
+const int kSosReasonUnspecified = 0; // an older build's packet, or "didn't say"
+const int kSosReasonMedical = 1;
+const int kSosReasonHeat = 2;
+const int kSosReasonChild = 3;
+const int kSosReasonElderly = 4;
+const int kSosReasonLost = 5;
+const int kSosReasonSafety = 6;
+const int kSosReasonOther = 7;
+
+/// Every reason a person can pick, in the order the picker shows them —
+/// which is deliberately ordered by how urgent the reason usually is, not
+/// alphabetically. Someone jabbing at a phone one-handed in a crowd hits the
+/// top of the list most easily.
+const List<int> kSosReasons = [
+  kSosReasonMedical,
+  kSosReasonHeat,
+  kSosReasonChild,
+  kSosReasonElderly,
+  kSosReasonLost,
+  kSosReasonSafety,
+  kSosReasonOther,
+];
+
+String sosReasonLabel(int reason) {
+  switch (reason) {
+    case kSosReasonMedical:
+      return 'Medical';
+    case kSosReasonHeat:
+      return 'Heat / Dehydration';
+    case kSosReasonChild:
+      return 'Child / Missing';
+    case kSosReasonElderly:
+      return 'Elderly / Vulnerable';
+    case kSosReasonLost:
+      return 'Lost / Separated';
+    case kSosReasonSafety:
+      return 'Safety / Threat';
+    case kSosReasonOther:
+      return 'Other';
+    default:
+      // Deliberately not "Unknown": from the receiver's point of view this
+      // is an SOS whose sender simply didn't say, which is exactly what the
+      // original protocol always sent.
+      return 'Emergency';
+  }
+}
+
+/// The single glyph that carries this reason on a lock screen and in a
+/// crowded list. Kept beside the label so the two never drift apart.
+String sosReasonEmoji(int reason) {
+  switch (reason) {
+    case kSosReasonMedical:
+      return '🩺';
+    case kSosReasonHeat:
+      return '🌡️';
+    case kSosReasonChild:
+      return '👶';
+    case kSosReasonElderly:
+      return '👴';
+    case kSosReasonLost:
+      return '🧭';
+    case kSosReasonSafety:
+      return '🚨';
+    case kSosReasonOther:
+      return '❓';
+    default:
+      return '🆘';
+  }
+}
+
+/// True when this reason names something specific — i.e. it came from a
+/// build that sends reasons and the person actually chose one. Guards every
+/// piece of UI that would otherwise render "Emergency emergency".
+bool sosReasonIsSpecific(int reason) =>
+    reason != kSosReasonUnspecified && kSosReasons.contains(reason);
+
+// How loudly a reason should sort. These are ONLY used to order a queue (see
+// AlertRecord.triageRank) — never to decide whether an alert is delivered or
+// relayed, which stays uniform for everything. A responder scanning three
+// simultaneous emergencies needs the bleeding one at the top; they do not
+// need the mesh quietly deciding the third one matters less.
+const int kSosPriorityCritical = 0;
+const int kSosPriorityHigh = 1;
+const int kSosPriorityNormal = 2;
+
+int sosReasonPriority(int reason) {
+  switch (reason) {
+    case kSosReasonMedical:
+    case kSosReasonChild:
+    case kSosReasonSafety:
+      return kSosPriorityCritical;
+    case kSosReasonHeat:
+    case kSosReasonElderly:
+      return kSosPriorityHigh;
+    default:
+      // Includes kSosReasonUnspecified. An SOS that didn't say why is still
+      // an SOS and still outranks every non-SOS alert — see triageRank.
+      return kSosPriorityNormal;
+  }
+}
+
 // A presence beacon lives in its own, separate wire format (packetType 2,
 // see PresencePacket below) rather than being a category of MeshPacket —
 // deliberately so it can carry a first name without touching the 15-byte
@@ -444,6 +566,139 @@ const int kHelpPointStatusPacketType = 10;
 const int kHelpPointStatusPacketLength =
     1 + 4 + 6 + 1; // 12 bytes — same shape as ResolvePacket
 
+// SPOTTED (packetType 11) — "I have just seen this missing person, here."
+//
+// The one state a missing-person search has that an SOS does not. An SOS
+// runs open → claimed → resolved, and that is the whole story. A search runs
+// for hours across kilometres of moving crowd, and the single most valuable
+// thing anyone can contribute short of finding the person is a sighting:
+// "she was at the water point ten minutes ago" turns a search of the entire
+// route into a search of two hundred metres.
+//
+// Deliberately NOT an ACK. An ACK means "I am handling this", which claims
+// the case and — under first-claim-wins — locks other responders out of
+// claiming it. A sighting is the opposite: the person reporting it is
+// usually walking on and CANNOT help further, and the case must stay open
+// and claimable. Conflating the two would silently mark searches as handled
+// by people who merely glanced at someone.
+//
+// It carries its own coordinates rather than reusing LocationPacket, because
+// LocationPacket is keyed by msgId and would overwrite where the report was
+// FILED from — the last-known-location the entire search is working back
+// from. A sighting is a second, later point, not a correction of the first.
+//
+// Like ACK and RESOLVE it has no TTL: relay-exactly-once per phone (see
+// MeshService._relayedResponses) bounds the flood without a hop counter.
+// And like them it is unauthenticated — anyone in range can forge a sighting
+// for a msgId they overheard, so the UI attributes it ("V7K2M9 reported a
+// sighting") rather than asserting it as fact.
+const int kSpottedPacketType = 11;
+const int kSpottedPacketLength =
+    1 + 4 + 6 + 1 + 4 + 4; // type + msgId + spotter + hasLocation + lat + lon
+
+/// "I saw them, here." See the note above kSpottedPacketType for why this is
+/// its own packet rather than an ACK, and why it carries its own position.
+class SpottedPacket {
+  final int msgId;
+  final String spotterMeshId;
+
+  /// Null when the spotter's phone had no fix. Absolutely never faked: a
+  /// sighting with no location is still enormously useful ("she is still on
+  /// this route somewhere") and is shown as exactly that.
+  final double? latitude;
+  final double? longitude;
+
+  SpottedPacket({
+    required this.msgId,
+    required this.spotterMeshId,
+    this.latitude,
+    this.longitude,
+  });
+
+  bool get hasLocation => latitude != null && longitude != null;
+
+  Uint8List encode() {
+    final bytes = Uint8List(kSpottedPacketLength);
+    bytes[0] = kSpottedPacketType;
+    final idBytes = ByteData(4)..setUint32(0, msgId, Endian.big);
+    bytes.setRange(1, 5, idBytes.buffer.asUint8List());
+    final who = asciiSafe(spotterMeshId).padRight(6).substring(0, 6);
+    bytes.setRange(5, 11, ascii.encode(who));
+    bytes[11] = hasLocation ? 1 : 0;
+    // Coordinates use the same degrees × 1e7 fixed point as LocationPacket.
+    // When there is no fix the flag byte above is what matters; these stay
+    // zero and are never read.
+    final coords = ByteData(8)
+      ..setInt32(0, hasLocation ? (latitude! * 1e7).round() : 0, Endian.big)
+      ..setInt32(4, hasLocation ? (longitude! * 1e7).round() : 0, Endian.big);
+    bytes.setRange(12, kSpottedPacketLength, coords.buffer.asUint8List());
+    return bytes;
+  }
+
+  static SpottedPacket? decode(List<int> raw) {
+    if (raw.length < kSpottedPacketLength) return null;
+    if (raw[0] != kSpottedPacketType) return null;
+    final idBytes = Uint8List.fromList(raw.sublist(1, 5));
+    final msgId = ByteData.sublistView(idBytes).getUint32(0, Endian.big);
+    final who = ascii.decode(raw.sublist(5, 11), allowInvalid: true).trim();
+    if (who.isEmpty) return null;
+
+    if (raw[11] != 1) {
+      return SpottedPacket(msgId: msgId, spotterMeshId: who);
+    }
+    final coords = ByteData.sublistView(
+      Uint8List.fromList(raw.sublist(12, kSpottedPacketLength)),
+    );
+    final lat = coords.getInt32(0, Endian.big) / 1e7;
+    final lon = coords.getInt32(4, Endian.big) / 1e7;
+    // Same guard as LocationPacket: a corrupt advertisement can decode to
+    // somewhere that is not on Earth, and sending a search party to garbage
+    // coordinates is worse than telling them the sighting had no position.
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      return SpottedPacket(msgId: msgId, spotterMeshId: who);
+    }
+    return SpottedPacket(
+      msgId: msgId,
+      spotterMeshId: who,
+      latitude: lat,
+      longitude: lon,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SOS → SEVA. Which help points are worth surfacing for a given emergency.
+//
+// Purely a lookup over Seva this phone has ALREADY discovered through the
+// mesh (see MeshService.activeHelpPoints) — it never asks the network for
+// anything, never reaches for the internet, and never invents a help point
+// that has not actually announced itself. If nothing relevant has been
+// heard, the honest answer is nothing at all, and the UI shows nothing.
+
+/// The help-point types worth offering someone in this kind of emergency,
+/// most relevant first. An empty list means "nothing specific" — which is
+/// the correct answer for an SOS that didn't say why, and for "Other".
+List<int> sevaStationsForReason(int reason) {
+  switch (reason) {
+    case kSosReasonMedical:
+      return const [kStationMedical, kStationFirstAid];
+    case kSosReasonHeat:
+      // Water first: rehydration is the immediate need, medical is the
+      // escalation if they are already down.
+      return const [kStationWater, kStationMedical];
+    case kSosReasonChild:
+      return const [kStationLostChildDesk, kStationPolice];
+    case kSosReasonElderly:
+      return const [kStationMedical, kStationFirstAid, kStationNightHalt];
+    case kSosReasonLost:
+      return const [kStationPolice, kStationLostChildDesk];
+    case kSosReasonSafety:
+      return const [kStationPolice];
+    default:
+      return const [];
+  }
+}
+
 /// A help point as stored on this phone — the durable counterpart to
 /// [HelpPointPacket], same relationship [AlertRecord] has to [MeshPacket].
 /// Written for every help point announced here *and* every one received,
@@ -598,12 +853,21 @@ String responderVerb(String role) =>
     role == 'Dindi Lead' ? 'is coordinating' : 'is responding';
 
 /// Whether [alert] belongs on a Dindi Lead's "DINDI EMERGENCIES" queue: an
-/// SOS (not a Lost Person report — that already has its own screen), not
-/// sent by this phone, from the Lead's own Dindi. A pure predicate over
-/// [AlertRecord] so it's testable without MeshService/BLE — see
-/// MeshService.dindiEmergencies for where it's actually applied.
+/// open alert from the Lead's own Dindi that this phone did not send.
+///
+/// Covers BOTH an SOS and a missing-person report, because both are things
+/// the Lead of that Dindi has to coordinate — one of their people needs help
+/// or one of their people is lost, and in either case the Lead is the person
+/// who knows who was walking with whom. (Missing persons are also still on
+/// the Missing screen, which is the reporter's own case file; this is the
+/// Lead's coordination view of the same alert.)
+///
+/// Resolved alerts drop off: a Lead's queue is what still needs
+/// coordinating, and a closed case belongs in history, not at the top of a
+/// home screen. A pure predicate over [AlertRecord] so it's testable without
+/// MeshService/BLE — see MeshService.dindiEmergencies for where it's applied.
 bool isDindiEmergency(AlertRecord alert, String myGroupTag) =>
-    !alert.mine && alert.isSos && alert.groupTag == myGroupTag;
+    !alert.mine && !alert.isResolved && alert.groupTag == myGroupTag;
 
 /// A short, deterministic 2-character tag derived from a Dindi/group name
 /// (or volunteer camp ID) so two phones from the same group produce the
@@ -641,16 +905,24 @@ class MeshPacket {
   final String senderLabel;
   final String groupTag;
 
+  /// What kind of emergency this is — one of the kSosReason* constants. Only
+  /// meaningful when [category] is kCategorySos; a Lost Person alert carries
+  /// kSosReasonUnspecified because its "what" is the missing person, not a
+  /// reason code. See the note above kPacketFullLength for why this is an
+  /// appended byte rather than packed into [category].
+  final int reason;
+
   MeshPacket({
     required this.ttl,
     required this.msgId,
     required this.category,
     required this.senderLabel,
     this.groupTag = '--',
+    this.reason = kSosReasonUnspecified,
   });
 
   Uint8List encode() {
-    final bytes = Uint8List(kPacketLength);
+    final bytes = Uint8List(kPacketFullLength);
     bytes[0] = kPacketType;
     bytes[1] = ttl & 0xFF;
     final idBytes = ByteData(4)..setUint32(0, msgId, Endian.big);
@@ -660,10 +932,15 @@ class MeshPacket {
     bytes.setRange(7, 13, ascii.encode(label));
     final tag = groupTag.padRight(2).substring(0, 2);
     bytes.setRange(13, 15, ascii.encode(tag));
+    bytes[kPacketLength] = reason & 0xFF;
     return bytes;
   }
 
   static MeshPacket? decode(List<int> raw) {
+    // Accepts both the original 15-byte form and the 16-byte reason form —
+    // see the note above kPacketFullLength. The length check stays at
+    // kPacketLength precisely so a packet from a phone that predates
+    // reasons still decodes rather than being dropped as malformed.
     if (raw.length < kPacketLength) return null;
     if (raw[0] != kPacketType) return null;
     final ttl = raw[1];
@@ -674,23 +951,35 @@ class MeshPacket {
     final groupTag = ascii
         .decode(raw.sublist(13, 15), allowInvalid: true)
         .trim();
+    final rawReason = raw.length > kPacketLength
+        ? raw[kPacketLength]
+        : kSosReasonUnspecified;
     return MeshPacket(
       ttl: ttl,
       msgId: msgId,
       category: category,
       senderLabel: label,
       groupTag: groupTag,
+      // An unrecognised reason from a newer build degrades to "an SOS that
+      // didn't say why" rather than to a wrong category — the same
+      // direction of caution as PresencePacket's unknown station code and
+      // ResolvePacket's unknown reason. Showing the wrong emergency type is
+      // worse than showing none.
+      reason: kSosReasons.contains(rawReason)
+          ? rawReason
+          : kSosReasonUnspecified,
     );
   }
 
   /// The packet this device re-advertises after deciding to relay: same
-  /// identity (msgId/category/sender/group), TTL down by one hop.
+  /// identity (msgId/category/sender/group/reason), TTL down by one hop.
   MeshPacket relayed() => MeshPacket(
     ttl: ttl - 1,
     msgId: msgId,
     category: category,
     senderLabel: senderLabel,
     groupTag: groupTag,
+    reason: reason,
   );
 }
 
@@ -1279,6 +1568,26 @@ class AlertRecord {
   int? resolvedReason;
   DateTime? resolvedAt;
 
+  /// What kind of emergency this is — one of the kSosReason* constants, as
+  /// carried on the alert packet's appended reason byte. kSosReasonUnspecified
+  /// for a Lost Person alert and for any SOS from a build that predates
+  /// reasons.
+  int reason;
+
+  /// The last time somebody reported laying eyes on a missing person, and
+  /// where. Only ever set for a Lost Person alert, and only from a SPOTTED
+  /// packet (see kSpottedPacketType) — this is the one piece of a
+  /// missing-person case that genuinely changes while the search is running.
+  ///
+  /// Deliberately separate from [latitude]/[longitude], which mean "where
+  /// the report was filed from". Overwriting those with a sighting would
+  /// destroy the last-known-location the search started from, which is the
+  /// one fact everybody is working back from.
+  String? spottedBy;
+  DateTime? spottedAt;
+  double? spottedLatitude;
+  double? spottedLongitude;
+
   /// How far and which way the sender was, computed against this phone's
   /// own position at read time rather than stored — both phones move, so a
   /// distance frozen at receipt would be a lie within a minute.
@@ -1294,6 +1603,7 @@ class AlertRecord {
     this.groupTag,
     this.hops = 0,
     this.mine = false,
+    this.reason = kSosReasonUnspecified,
     this.lostName,
     this.lostAge,
     this.latitude,
@@ -1303,9 +1613,39 @@ class AlertRecord {
     this.resolvedBy,
     this.resolvedReason,
     this.resolvedAt,
+    this.spottedBy,
+    this.spottedAt,
+    this.spottedLatitude,
+    this.spottedLongitude,
   });
 
   bool get isSos => category == kCategorySos;
+
+  /// True once somebody has reported seeing the missing person. A live
+  /// search state that sits between "searching" and "found" — see
+  /// SpottedPacket.
+  bool get isSpotted => spottedAt != null && !isResolved;
+
+  bool get hasSpottedLocation =>
+      spottedLatitude != null && spottedLongitude != null;
+
+  /// The reason as something to show a person, or null when there is nothing
+  /// specific to say. Callers use null to fall back to the plain [title]
+  /// rather than printing a filler word.
+  String? get reasonLabel =>
+      sosReasonIsSpecific(reason) ? sosReasonLabel(reason) : null;
+
+  String? get reasonEmoji =>
+      sosReasonIsSpecific(reason) ? sosReasonEmoji(reason) : null;
+
+  /// The headline a responder reads first: "🩺 Medical SOS", or plain "SOS"
+  /// when the sender didn't say (or couldn't — an older build).
+  String get headline {
+    if (!isSos) return 'Missing person';
+    final label = reasonLabel;
+    return label == null ? 'SOS' : '${sosReasonEmoji(reason)} $label SOS';
+  }
+
   bool get isResolved => resolvedAt != null;
   bool get isClaimed => claimedBy != null && !isResolved;
   bool get isOpen => !isClaimed && !isResolved;
@@ -1366,10 +1706,17 @@ class AlertRecord {
   /// person, unclaimed before claimed, then oldest first. Nothing here is
   /// clever — a volunteer scanning a screen while walking needs the order
   /// to be the same every time they look at it.
+  ///
+  /// Within the unclaimed-SOS band the reason breaks the tie (see
+  /// sosReasonPriority): a medical emergency sorts above a
+  /// lost-and-separated one. The bands themselves are unchanged and stay
+  /// three apart, so an unclaimed SOS of ANY reason — including one that
+  /// didn't say — still outranks every lost-person alert, exactly as
+  /// before. Priority orders a list; it never decides what gets delivered.
   int get triageRank {
     if (isResolved) return 40;
     if (isClaimed) return isSos ? 20 : 30;
-    return isSos ? 0 : 10;
+    return isSos ? sosReasonPriority(reason) : 10;
   }
 
   Map<String, Object?> toMap() => {
@@ -1390,6 +1737,11 @@ class AlertRecord {
     'resolved_by': resolvedBy,
     'resolved_reason': resolvedReason,
     'resolved_at': resolvedAt?.millisecondsSinceEpoch,
+    'reason': reason,
+    'spotted_by': spottedBy,
+    'spotted_at': spottedAt?.millisecondsSinceEpoch,
+    'spotted_lat': spottedLatitude,
+    'spotted_lon': spottedLongitude,
   };
 
   static AlertRecord fromMap(Map<String, Object?> map) => AlertRecord(
@@ -1401,6 +1753,7 @@ class AlertRecord {
     receivedAt: DateTime.fromMillisecondsSinceEpoch(map['received_at'] as int),
     hops: (map['hops'] as int?) ?? 0,
     mine: ((map['mine'] as int?) ?? 0) == 1,
+    reason: (map['reason'] as int?) ?? kSosReasonUnspecified,
     lostName: map['lost_name'] as String?,
     lostAge: map['lost_age'] as String?,
     latitude: map['latitude'] as double?,
@@ -1410,6 +1763,10 @@ class AlertRecord {
     resolvedBy: map['resolved_by'] as String?,
     resolvedReason: map['resolved_reason'] as int?,
     resolvedAt: _time(map['resolved_at']),
+    spottedBy: map['spotted_by'] as String?,
+    spottedAt: _time(map['spotted_at']),
+    spottedLatitude: map['spotted_lat'] as double?,
+    spottedLongitude: map['spotted_lon'] as double?,
   );
 
   static DateTime? _time(Object? raw) =>

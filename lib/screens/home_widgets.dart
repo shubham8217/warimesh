@@ -134,6 +134,8 @@ class NearbySevaCard extends StatelessWidget {
 
   const NearbySevaCard({super.key, required this.points, required this.onTap});
 
+  /// Shared with [RelevantSevaCard] so one help-point type can never end up
+  /// wearing two different icons in two places on the same screen.
   static const Map<int, IconData> _icons = {
     kStationMedical: Icons.medical_services,
     kStationWater: Icons.water_drop,
@@ -146,6 +148,9 @@ class NearbySevaCard extends StatelessWidget {
     kStationFirstAid: Icons.health_and_safety,
     kStationOther: Icons.info,
   };
+
+  static IconData iconFor(int helpType) =>
+      _icons[helpType] ?? Icons.help_outline;
 
   static Color _statusColor(HelpPointRecord p) =>
       p.isLimited ? AppColors.warning : AppColors.relayed;
@@ -368,6 +373,145 @@ class _CheckLine extends StatelessWidget {
   }
 }
 
+/// The SOS → Seva bridge: help points worth walking to for the emergency
+/// you just reported.
+///
+/// Renders nothing at all when nothing relevant has been heard, and that is
+/// the important behaviour rather than a missing empty state. This card is
+/// shown to somebody who has just pressed SOS; telling them "no water point
+/// nearby" when the truth is "no water point has announced itself within
+/// Bluetooth range of this phone" would be a claim the mesh cannot make. The
+/// absence of a card says exactly as much as the mesh actually knows.
+///
+/// Never shows a distance — see the note on HelpPointsCard for why "in
+/// range" is the only honest proximity signal a presence-discovered help
+/// point has.
+class RelevantSevaCard extends StatelessWidget {
+  final int reason;
+  final List<HelpPointRecord> seva;
+  final ValueChanged<HelpPointRecord> onTap;
+
+  const RelevantSevaCard({
+    super.key,
+    required this.reason,
+    required this.seva,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (seva.isEmpty) return const SizedBox.shrink();
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    // Cap the list: someone mid-emergency needs the nearest couple of
+    // options, not an inventory.
+    final shown = seva.take(3).toList();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.relayed.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.relayed.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.volunteer_activism,
+                color: AppColors.relayed,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  shown.length == 1
+                      ? '${shown.first.label} Seva nearby'
+                      : 'Seva nearby',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                    color: AppColors.relayed,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Discovered through WariMesh — no internet involved.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: muted),
+          ),
+          const SizedBox(height: 10),
+          for (final point in shown)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => onTap(point),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 10,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          NearbySevaCard.iconFor(point.helpType),
+                          size: 20,
+                          color: AppColors.relayed,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                point.label,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              Text(
+                                '${helpStatusLabel(point.status)} · ${point.freshnessLabel}',
+                                style: Theme.of(
+                                  context,
+                                ).textTheme.bodySmall?.copyWith(color: muted),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Text(
+                          'VIEW',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 12,
+                            color: AppColors.relayed,
+                          ),
+                        ),
+                        const Icon(
+                          Icons.chevron_right,
+                          size: 18,
+                          color: AppColors.relayed,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 /// "DINDI EMERGENCIES" — a Dindi Lead's coordination queue. Shown only when
 /// MeshService.amDindiLead is true and there's something in it; see
 /// MeshService.dindiEmergencies for the filter (open SOS from this phone's
@@ -435,6 +579,28 @@ class DindiEmergencyCard extends StatelessWidget {
     required this.onCoordinate,
   });
 
+  /// Three live states, in the order they actually happen. "Searching" is
+  /// the missing-person wording for the same unclaimed state an SOS calls
+  /// "Unattended" — a Lead reading it should see the word that matches what
+  /// is going on, not a generic status.
+  String get _statusText {
+    if (alert.isSpotted) return 'Spotted';
+    if (alert.isClaimed) return 'Taken';
+    return alert.isSos ? 'Unattended' : 'Searching';
+  }
+
+  Color get _statusColor {
+    if (alert.isSpotted) return AppColors.warning;
+    if (alert.isClaimed) return AppColors.warning;
+    return AppColors.sos;
+  }
+
+  IconData get _statusIcon {
+    if (alert.isSpotted) return Icons.visibility;
+    if (alert.isClaimed) return Icons.directions_run;
+    return Icons.priority_high;
+  }
+
   @override
   Widget build(BuildContext context) {
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
@@ -454,22 +620,47 @@ class DindiEmergencyCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.sos, color: AppColors.sos, size: 22),
+              Icon(
+                alert.isSos ? Icons.sos : Icons.person_search,
+                color: AppColors.sos,
+                size: 22,
+              ),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'SOS FROM YOUR DINDI',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                  alert.isSos
+                      ? 'SOS FROM YOUR DINDI'
+                      : 'MISSING WARKARI FROM YOUR DINDI',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                  ),
                 ),
               ),
               StatusPill(
-                text: claimed ? 'Taken' : 'Unattended',
-                color: claimed ? AppColors.warning : AppColors.sos,
-                icon: claimed ? Icons.directions_run : Icons.priority_high,
+                text: _statusText,
+                color: _statusColor,
+                icon: _statusIcon,
               ),
             ],
           ),
+          // The reason, given its own line at full size — for a Lead
+          // deciding whether to walk over or send someone, "Medical" versus
+          // "Lost / Separated" is the entire decision.
+          if (alert.reasonLabel != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              '${alert.reasonEmoji}  ${alert.reasonLabel}',
+              style: const TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 17,
+                color: AppColors.sos,
+              ),
+            ),
+          ],
           const SizedBox(height: 10),
+          if (!alert.isSos && alert.lostSummary != null)
+            _Field(label: 'Looking for', value: alert.lostSummary!),
           _Field(label: 'Member', value: who),
           _Field(label: 'Dindi', value: dindiName),
           _Field(label: 'Location', value: _locationText()),
@@ -477,6 +668,7 @@ class DindiEmergencyCard extends StatelessWidget {
             label: 'Time',
             value: TimeOfDay.fromDateTime(alert.receivedAt).format(context),
           ),
+          if (alert.isSpotted) SpottedLine(alert: alert, mesh: mesh),
           if (claimed) ...[
             const SizedBox(height: 8),
             Builder(
@@ -495,9 +687,47 @@ class DindiEmergencyCard extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 12),
+          // A missing-person case gets FOUND as its primary action rather
+          // than RESPOND — the Lead's job on a search is to close it the
+          // moment the person is back, and "found" is the one word everyone
+          // on the mesh is waiting for.
+          if (!alert.isSos) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.relayed,
+                    ),
+                    onPressed: () =>
+                        mesh.resolveAlert(alert, reason: kResolveFound),
+                    icon: const Icon(Icons.check_circle_outline, size: 18),
+                    label: const Text('FOUND'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => mesh.reportSpotted(alert),
+                    icon: const Icon(Icons.visibility_outlined, size: 18),
+                    label: const Text('SPOTTED'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+          ],
           Row(
             children: [
-              if (!claimed)
+              if (!alert.isSos)
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onCoordinate,
+                    icon: const Icon(Icons.forum_outlined, size: 18),
+                    label: const Text('COORDINATE'),
+                  ),
+                )
+              else if (!claimed)
                 Expanded(
                   child: FilledButton.icon(
                     style: FilledButton.styleFrom(
@@ -524,14 +754,19 @@ class DindiEmergencyCard extends StatelessWidget {
                     label: const Text('Close'),
                   ),
                 ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: onCoordinate,
-                  icon: const Icon(Icons.forum_outlined, size: 18),
-                  label: const Text('COORDINATE'),
+              // A missing-person case already offered COORDINATE as its own
+              // full-width action above, alongside FOUND/SPOTTED — this
+              // second one is the SOS layout's partner to RESPOND.
+              if (alert.isSos) ...[
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onCoordinate,
+                    icon: const Icon(Icons.forum_outlined, size: 18),
+                    label: const Text('COORDINATE'),
+                  ),
                 ),
-              ),
+              ],
             ],
           ),
           const SizedBox(height: 4),
@@ -559,6 +794,77 @@ class DindiEmergencyCard extends StatelessWidget {
       return 'Position known, no fix on this phone to measure from';
     }
     return 'Location unavailable';
+  }
+}
+
+/// "👀 Sunita reported seeing them · 4 min ago" — the live state of a
+/// search between "nobody has seen them" and "found". Shared by the Dindi
+/// Lead's card and the volunteer queue so a sighting reads identically to
+/// everyone working the same case.
+///
+/// Attributed, never asserted: a SPOTTED packet is unauthenticated like
+/// every other response packet (see kSpottedPacketType), so this says who
+/// reported it rather than stating it as fact.
+class SpottedLine extends StatelessWidget {
+  final AlertRecord alert;
+  final MeshService mesh;
+
+  const SpottedLine({super.key, required this.alert, required this.mesh});
+
+  @override
+  Widget build(BuildContext context) {
+    final by = alert.spottedBy;
+    if (by == null) return const SizedBox.shrink();
+    final who = by == mesh.myMeshId ? 'You' : (mesh.nameFor(by) ?? by);
+    final at = alert.spottedAt;
+    final when = at == null
+        ? ''
+        : ' · ${TimeOfDay.fromDateTime(at).format(context)}';
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.warning.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.visibility, size: 18, color: AppColors.warning),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$who reported seeing them$when',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.warning,
+                      fontSize: 13,
+                    ),
+                  ),
+                  // Never fabricated. A sighting with no position is still
+                  // worth a great deal — it says the person is alive and on
+                  // this stretch of route — and says exactly that.
+                  Text(
+                    alert.hasSpottedLocation
+                        ? 'Position sent with the sighting'
+                        : 'No position sent with the sighting',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

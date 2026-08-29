@@ -9,6 +9,9 @@ import 'package:flutter/material.dart';
 import '../mesh_service.dart';
 import '../models.dart';
 import '../theme.dart';
+import 'help_point_detail_screen.dart';
+import 'home_widgets.dart';
+import 'sos_reason_sheet.dart';
 
 class SosScreen extends StatefulWidget {
   final MeshService mesh;
@@ -27,6 +30,7 @@ class _SosScreenState extends State<SosScreen>
   Timer? _holdTimer;
   MeshPacket? _lastSent;
   int _category = kCategorySos;
+  int _sentReason = kSosReasonUnspecified;
 
   static const _holdDuration = Duration(milliseconds: 900);
 
@@ -58,8 +62,20 @@ class _SosScreenState extends State<SosScreen>
   }
 
   Future<void> _confirmSend() async {
-    setState(() => _state = _SendState.sending);
-    final packet = await widget.mesh.sendAlert(_category);
+    // "What do you need help with?" — see sos_reason_sheet.dart. Only for an
+    // SOS: a Lost Person alert's "what" is the person, and it has its own
+    // form already. Dismissing the sheet still sends, as unspecified.
+    var reason = kSosReasonUnspecified;
+    if (_category == kCategorySos) {
+      reason = await askSosReason(context);
+      if (!mounted) return;
+    }
+
+    setState(() {
+      _state = _SendState.sending;
+      _sentReason = reason;
+    });
+    final packet = await widget.mesh.sendAlert(_category, reason: reason);
     if (!mounted) return;
     if (packet == null) {
       setState(() => _state = _SendState.idle);
@@ -139,11 +155,28 @@ class _SosScreenState extends State<SosScreen>
             _state == _SendState.sent &&
             _category == kCategorySos)
           Padding(
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
             child: Column(
-              children: const [
-                _SentCheckLine('Alert propagated to your Dindi'),
-                _SentCheckLine('Alert propagated to nearby volunteers'),
+              children: [
+                const _SentCheckLine('Alert propagated to your Dindi'),
+                const _SentCheckLine('Alert propagated to nearby volunteers'),
+                // Seva already discovered through the mesh that matches what
+                // is wrong. Shown right here because this is the screen
+                // somebody is still looking at in the seconds after pressing
+                // SOS — see RelevantSevaCard.
+                if (mesh.sevaForReason(_sentReason).isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  RelevantSevaCard(
+                    reason: _sentReason,
+                    seva: mesh.sevaForReason(_sentReason),
+                    onTap: (point) => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            HelpPointDetailScreen(mesh: mesh, point: point),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -252,9 +285,12 @@ class _SosScreenState extends State<SosScreen>
         text = 'Broadcasting over the mesh…';
         break;
       case _SendState.sent:
-        text = _category == kCategorySos
-            ? 'SOS SENT · TTL ${_lastSent?.ttl} · msg #${_lastSent?.msgId}'
-            : '${categoryLabel(_category)} sent · TTL ${_lastSent?.ttl} · msg #${_lastSent?.msgId}';
+        final headline = _category != kCategorySos
+            ? '${categoryLabel(_category)} sent'
+            : sosReasonIsSpecific(_sentReason)
+            ? '${sosReasonEmoji(_sentReason)} ${sosReasonLabel(_sentReason).toUpperCase()} SOS SENT'
+            : 'SOS SENT';
+        text = '$headline · TTL ${_lastSent?.ttl} · msg #${_lastSent?.msgId}';
         break;
     }
     return Text(

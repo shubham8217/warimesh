@@ -20,7 +20,11 @@ import '../mesh_service.dart';
 import '../models.dart';
 import '../theme.dart';
 
-Future<void> showMeshAlert(BuildContext context, MeshService mesh, IncomingAlert alert) {
+Future<void> showMeshAlert(
+  BuildContext context,
+  MeshService mesh,
+  IncomingAlert alert,
+) {
   HapticFeedback.heavyImpact();
   return showDialog<void>(
     context: context,
@@ -73,7 +77,11 @@ class _MeshAlertHostState extends State<MeshAlertHost> {
     _showing = true;
     try {
       while (mounted && widget.mesh.pendingAlerts.isNotEmpty) {
-        await showMeshAlert(context, widget.mesh, widget.mesh.pendingAlerts.first);
+        await showMeshAlert(
+          context,
+          widget.mesh,
+          widget.mesh.pendingAlerts.first,
+        );
         widget.mesh.acknowledgeAlert();
       }
     } finally {
@@ -95,11 +103,16 @@ class _AlertDialog extends StatelessWidget {
   /// they do. Acknowledging stays an explicit, separate act.
   Future<void> _openDirections(BuildContext context) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
-    final opened = await openWalkingDirections(alert.senderLatitude!, alert.senderLongitude!);
+    final opened = await openWalkingDirections(
+      alert.senderLatitude!,
+      alert.senderLongitude!,
+    );
     if (opened || !context.mounted) return;
     messenger?.showSnackBar(
       const SnackBar(
-        content: Text('No maps app could open — the coordinates above can be typed in by hand'),
+        content: Text(
+          'No maps app could open — the coordinates above can be typed in by hand',
+        ),
       ),
     );
   }
@@ -125,21 +138,47 @@ class _AlertDialog extends StatelessWidget {
               Center(
                 child: Container(
                   padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(color: color.withValues(alpha: 0.12), shape: BoxShape.circle),
-                  child: Icon(alert.isSos ? Icons.sos : Icons.person_search, size: 44, color: color),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: sosReasonIsSpecific(alert.packet.reason)
+                      ? Text(
+                          sosReasonEmoji(alert.packet.reason),
+                          style: const TextStyle(fontSize: 40),
+                        )
+                      : Icon(
+                          alert.isSos ? Icons.sos : Icons.person_search,
+                          size: 44,
+                          color: color,
+                        ),
                 ),
               ),
               const SizedBox(height: 18),
               Text(
-                alert.isSos ? 'SOS RECEIVED' : 'MISSING PERSON',
+                !alert.isSos
+                    ? 'MISSING PERSON'
+                    : sosReasonIsSpecific(alert.packet.reason)
+                    ? '${sosReasonLabel(alert.packet.reason).toUpperCase()} SOS'
+                    : 'SOS RECEIVED',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 22, letterSpacing: 0.5),
+                style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 22,
+                  letterSpacing: 0.5,
+                ),
               ),
               const SizedBox(height: 6),
               Text(
-                alert.isSos
-                    ? 'Someone nearby needs help right now.'
-                    : 'Someone nearby is looking for a missing person.',
+                // What they said is wrong, in a full sentence — this is the
+                // screen somebody reads at arm's length while deciding
+                // whether to start running.
+                !alert.isSos
+                    ? 'Someone nearby is looking for a missing person.'
+                    : sosReasonIsSpecific(alert.packet.reason)
+                    ? 'Someone nearby needs help — ${sosReasonLabel(alert.packet.reason).toLowerCase()}.'
+                    : 'Someone nearby needs help right now.',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
@@ -185,7 +224,8 @@ class _AlertDialog extends StatelessWidget {
                           children: [
                             Text(
                               'LOOK FOR',
-                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(
                                     fontWeight: FontWeight.w700,
                                     letterSpacing: 0.8,
                                     color: color,
@@ -196,18 +236,27 @@ class _AlertDialog extends StatelessWidget {
                               alert.lostAge == null || alert.lostAge!.isEmpty
                                   ? alert.lostName!
                                   : '${alert.lostName!} · age ${alert.lostAge!}',
-                              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 19),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 19,
+                              ),
                             ),
                           ],
                         ),
                 ),
               if (!alert.isSos) const SizedBox(height: 14),
 
-              _DetailRow(icon: Icons.person_outline, label: 'From', value: sender),
+              _DetailRow(
+                icon: Icons.person_outline,
+                label: 'From',
+                value: sender,
+              ),
               _DetailRow(
                 icon: Icons.route_outlined,
                 label: 'Reached you',
-                value: alert.hops == 0 ? 'directly' : 'via ${alert.hops} relay${alert.hops == 1 ? '' : 's'}',
+                value: alert.hops == 0
+                    ? 'directly'
+                    : 'via ${alert.hops} relay${alert.hops == 1 ? '' : 's'}',
               ),
               _DetailRow(
                 icon: Icons.schedule,
@@ -232,13 +281,17 @@ class _AlertDialog extends StatelessWidget {
                 const SizedBox(height: 10),
                 OutlinedButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: Text(alert.isSos ? 'I\'ve seen this' : 'Got it — I\'ll look'),
+                  child: Text(
+                    alert.isSos ? 'I\'ve seen this' : 'Got it — I\'ll look',
+                  ),
                 ),
               ] else
                 FilledButton(
                   style: FilledButton.styleFrom(backgroundColor: color),
                   onPressed: () => Navigator.of(context).pop(),
-                  child: Text(alert.isSos ? 'I\'ve seen this' : 'Got it — I\'ll look'),
+                  child: Text(
+                    alert.isSos ? 'I\'ve seen this' : 'Got it — I\'ll look',
+                  ),
                 ),
             ],
           ),
@@ -270,7 +323,8 @@ class _LocationCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final distance = alert.distanceLabel;
     final direction = alert.directionLabel;
-    final coords = '${alert.senderLatitude!.toStringAsFixed(5)}, '
+    final coords =
+        '${alert.senderLatitude!.toStringAsFixed(5)}, '
         '${alert.senderLongitude!.toStringAsFixed(5)}';
 
     return Container(
@@ -291,15 +345,18 @@ class _LocationCard extends StatelessWidget {
                 Text(
                   'SENT FROM',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.8,
-                        color: color,
-                      ),
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    color: color,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   distance ?? 'Location received',
-                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 19),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 19,
+                  ),
                 ),
                 if (direction != null)
                   Text(
@@ -315,8 +372,8 @@ class _LocationCard extends StatelessWidget {
                 SelectableText(
                   coords,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
                 ),
               ],
             ),
@@ -332,7 +389,11 @@ class _DetailRow extends StatelessWidget {
   final String label;
   final String value;
 
-  const _DetailRow({required this.icon, required this.label, required this.value});
+  const _DetailRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -340,11 +401,18 @@ class _DetailRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Icon(icon, size: 17, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          Icon(
+            icon,
+            size: 17,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
           const SizedBox(width: 10),
           Text(label, style: Theme.of(context).textTheme.bodySmall),
           const Spacer(),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+          Text(
+            value,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+          ),
         ],
       ),
     );

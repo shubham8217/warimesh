@@ -257,6 +257,131 @@ void main() {
     );
   });
 
+  group('alerts table — SOS reason and sightings', () {
+    test('a fresh database accepts an SOS reason and reads it back', () async {
+      await AlertsDb.insertIfNew(
+        AlertRecord(
+          msgId: 5001,
+          category: kCategorySos,
+          senderLabel: 'W7K2M9',
+          groupTag: 'AB',
+          receivedAt: DateTime.now(),
+          reason: kSosReasonMedical,
+        ),
+      );
+      final stored = (await AlertsDb.all()).firstWhere((a) => a.msgId == 5001);
+      expect(stored.reason, kSosReasonMedical);
+      expect(stored.reasonLabel, 'Medical');
+    });
+
+    test('an alert stored without a reason survives as unspecified', () async {
+      await AlertsDb.insertIfNew(
+        AlertRecord(
+          msgId: 5002,
+          category: kCategorySos,
+          senderLabel: 'W7K2M9',
+          receivedAt: DateTime.now(),
+        ),
+      );
+      final stored = (await AlertsDb.all()).firstWhere((a) => a.msgId == 5002);
+      expect(stored.reason, kSosReasonUnspecified);
+      expect(stored.reasonLabel, isNull);
+    });
+
+    test(
+      'a sighting is recorded without disturbing the report location',
+      () async {
+        await AlertsDb.insertIfNew(
+          AlertRecord(
+            msgId: 5003,
+            category: kCategoryLostPerson,
+            senderLabel: 'W7K2M9',
+            receivedAt: DateTime.now(),
+            latitude: 17.679076,
+            longitude: 75.323997,
+          ),
+        );
+        await AlertsDb.setSpotted(
+          5003,
+          'V4B2XY',
+          DateTime.now(),
+          latitude: 18.5,
+          longitude: 73.85,
+        );
+
+        final stored = (await AlertsDb.all()).firstWhere(
+          (a) => a.msgId == 5003,
+        );
+        expect(stored.isSpotted, isTrue);
+        expect(stored.spottedBy, 'V4B2XY');
+        expect(stored.spottedLatitude, closeTo(18.5, 1e-9));
+        // The whole point: where the report was FILED from is untouched, so
+        // the search still knows where to work back from.
+        expect(stored.latitude, closeTo(17.679076, 1e-9));
+      },
+    );
+
+    test('a later sighting replaces an earlier one', () async {
+      // Opposite rule to a claim, and deliberately so — the newest sighting
+      // of someone who is moving is the useful one.
+      await AlertsDb.insertIfNew(
+        AlertRecord(
+          msgId: 5004,
+          category: kCategoryLostPerson,
+          senderLabel: 'W7K2M9',
+          receivedAt: DateTime.now(),
+        ),
+      );
+      await AlertsDb.setSpotted(5004, 'V1AAAA', DateTime.now());
+      await AlertsDb.setSpotted(5004, 'V2BBBB', DateTime.now());
+
+      final stored = (await AlertsDb.all()).firstWhere((a) => a.msgId == 5004);
+      expect(stored.spottedBy, 'V2BBBB');
+    });
+
+    test(
+      'a sighting with no GPS stores no coordinates rather than zeros',
+      () async {
+        await AlertsDb.insertIfNew(
+          AlertRecord(
+            msgId: 5005,
+            category: kCategoryLostPerson,
+            senderLabel: 'W7K2M9',
+            receivedAt: DateTime.now(),
+          ),
+        );
+        await AlertsDb.setSpotted(5005, 'V4B2XY', DateTime.now());
+
+        final stored = (await AlertsDb.all()).firstWhere(
+          (a) => a.msgId == 5005,
+        );
+        expect(stored.isSpotted, isTrue);
+        expect(stored.hasSpottedLocation, isFalse);
+        expect(stored.spottedLatitude, isNull);
+      },
+    );
+
+    test(
+      're-hearing an alert never clobbers a sighting already recorded',
+      () async {
+        final record = AlertRecord(
+          msgId: 5006,
+          category: kCategoryLostPerson,
+          senderLabel: 'W7K2M9',
+          receivedAt: DateTime.now(),
+        );
+        await AlertsDb.insertIfNew(record);
+        await AlertsDb.setSpotted(5006, 'V4B2XY', DateTime.now());
+        await AlertsDb.insertIfNew(record); // the sender re-airs it all airtime
+
+        final stored = (await AlertsDb.all()).firstWhere(
+          (a) => a.msgId == 5006,
+        );
+        expect(stored.spottedBy, 'V4B2XY');
+      },
+    );
+  });
+
   group('help_points table', () {
     HelpPointRecord record(
       int msgId, {

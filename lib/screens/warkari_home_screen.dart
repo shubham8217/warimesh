@@ -144,6 +144,23 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
                   roleFor: mesh.responderRoleLabelFor,
                 ),
                 const SizedBox(height: 12),
+                // Seva worth walking to for the emergency you just reported.
+                // Renders nothing when nothing relevant has been heard —
+                // see RelevantSevaCard for why silence is the honest answer.
+                if (!myAlert.isResolved) ...[
+                  RelevantSevaCard(
+                    reason: myAlert.reason,
+                    seva: mesh.sevaForReason(myAlert.reason),
+                    onTap: (point) => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            HelpPointDetailScreen(mesh: mesh, point: point),
+                      ),
+                    ),
+                  ),
+                  if (mesh.sevaForReason(myAlert.reason).isNotEmpty)
+                    const SizedBox(height: 12),
+                ],
               ],
               // Only ever populated when this phone has declared itself the
               // Dindi Lead (see MeshService.amDindiLead) — an ordinary

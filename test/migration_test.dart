@@ -155,6 +155,37 @@ void main() {
   );
 
   test(
+    'alerts.reason and the sighting columns (v11) exist after upgrading from v2',
+    () async {
+      // Same failure mode this file guards against, one migration step later
+      // again: an alerts table that never saw v11's onUpgrade branch must
+      // still accept a reason and a sighting rather than throwing "no such
+      // column: reason".
+      await AlertsDb.insertIfNew(
+        AlertRecord(
+          msgId: 4242,
+          category: kCategorySos,
+          senderLabel: 'W7K2M9',
+          receivedAt: DateTime.now(),
+          reason: kSosReasonHeat,
+        ),
+      );
+      await AlertsDb.setSpotted(
+        4242,
+        'V4B2XY',
+        DateTime.now(),
+        latitude: 18.5,
+        longitude: 73.85,
+      );
+
+      final stored = (await AlertsDb.all()).firstWhere((a) => a.msgId == 4242);
+      expect(stored.reason, kSosReasonHeat);
+      expect(stored.spottedBy, 'V4B2XY');
+      expect(stored.spottedLatitude, closeTo(18.5, 1e-9));
+    },
+  );
+
+  test(
     'help_points (introduced at v9) exists on a database upgraded from v2',
     () async {
       // Same failure mode this whole file guards against, one migration step

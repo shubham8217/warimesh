@@ -23,6 +23,7 @@ import '../mesh_service.dart';
 import '../models.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import 'home_widgets.dart';
 
 class AlertsScreen extends StatelessWidget {
   final MeshService mesh;
@@ -154,7 +155,11 @@ class AlertQueueCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          alert.lostSummary ?? alert.title,
+                          // "🩺 Medical SOS" when the sender said what was
+                          // wrong; the plain title otherwise. For a missing
+                          // person the name still wins — that is the thing
+                          // the responder is scanning the crowd for.
+                          alert.lostSummary ?? alert.headline,
                           style: const TextStyle(
                             fontWeight: FontWeight.w800,
                             fontSize: 17,
@@ -173,8 +178,20 @@ class AlertQueueCard extends StatelessWidget {
                   _StateChip(alert: alert),
                 ],
               ),
+              // The reason again as a small chip when the headline above is
+              // showing a missing person's name instead — a responder still
+              // needs to see it, but the name is what gets top billing.
+              if (alert.lostSummary != null && alert.reasonLabel != null) ...[
+                const SizedBox(height: 8),
+                StatusPill(
+                  text: alert.reasonLabel!,
+                  color: AppColors.sos,
+                  icon: Icons.info_outline,
+                ),
+              ],
               const SizedBox(height: 12),
               _LocationLine(alert: alert),
+              if (alert.isSpotted) SpottedLine(alert: alert, mesh: mesh),
               if (alert.isClaimed) ...[
                 const SizedBox(height: 10),
                 _ClaimBanner(alert: alert, mesh: mesh),
@@ -380,6 +397,47 @@ class _Actions extends StatelessWidget {
 
     final mineToClose = alert.isOpen || alert.claimedByMe(mesh.myMeshId);
 
+    return Column(
+      children: [
+        // SPOTTED is offered on every open missing-person case, claimed or
+        // not, and deliberately does NOT claim it — see the note on
+        // kSpottedPacketType. A volunteer who spots a child while walking to
+        // something else can say so in one tap and keep going, and the case
+        // stays open for whoever can actually stop.
+        if (!alert.isSos) ...[
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => mesh.reportSpotted(alert),
+              icon: const Icon(Icons.visibility_outlined, size: 18),
+              label: Text(
+                alert.isSpotted
+                    ? 'Report another sighting'
+                    : "I'VE SPOTTED THEM",
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+        _ClaimResolveRow(alert: alert, mesh: mesh, mineToClose: mineToClose),
+      ],
+    );
+  }
+}
+
+class _ClaimResolveRow extends StatelessWidget {
+  final AlertRecord alert;
+  final MeshService mesh;
+  final bool mineToClose;
+
+  const _ClaimResolveRow({
+    required this.alert,
+    required this.mesh,
+    required this.mineToClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Row(
       children: [
         if (alert.isOpen)
