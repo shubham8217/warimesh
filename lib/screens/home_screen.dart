@@ -11,10 +11,19 @@ import 'activity_log_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final MeshService mesh;
+  final UserProfile volunteer;
+  final VoidCallback onLogout;
   final VoidCallback onOpenSos;
   final VoidCallback onOpenMissing;
 
-  const HomeScreen({super.key, required this.mesh, required this.onOpenSos, required this.onOpenMissing});
+  const HomeScreen({
+    super.key,
+    required this.mesh,
+    required this.volunteer,
+    required this.onLogout,
+    required this.onOpenSos,
+    required this.onOpenMissing,
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -62,6 +71,33 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => ActivityLogScreen(mesh: mesh)),
               ),
+            ),
+            PopupMenuButton<String>(
+              tooltip: 'Volunteer',
+              icon: const Icon(Icons.person_outline),
+              onSelected: (v) {
+                if (v == 'logout') widget.onLogout();
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem<String>(
+                  enabled: false,
+                  child: Text(
+                    widget.volunteer.name,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+                const PopupMenuDivider(),
+                const PopupMenuItem<String>(
+                  value: 'logout',
+                  child: Row(
+                    children: [
+                      Icon(Icons.logout, size: 18),
+                      SizedBox(width: 10),
+                      Text('Sign out'),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ],
         ),

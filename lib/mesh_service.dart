@@ -44,6 +44,7 @@ class MeshService extends ChangeNotifier {
   Timer? _cooldownTicker;
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothAdapterState>? _adapterSub;
+  bool _disposed = false;
 
   Duration get cooldownRemaining {
     if (_lastSendAt == null) return Duration.zero;
@@ -105,12 +106,26 @@ class MeshService extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _scanSub?.cancel();
     _adapterSub?.cancel();
     _cooldownTicker?.cancel();
     FlutterForegroundTask.removeTaskDataCallback(_onForegroundTaskData);
     FlutterBluePlus.stopScan();
     super.dispose();
+  }
+
+  // bootstrap() is a long chain of independently-awaited steps (permissions,
+  // notifications, DB, BLE …) — if whatever owns this MeshService gets torn
+  // down while a step is still in flight, callbacks and notifyListeners()
+  // calls could otherwise land after dispose() and crash the (correct,
+  // debug-only) ChangeNotifier assertion. Every notifyListeners() in this
+  // class goes through here so a disposed service just quietly stops
+  // announcing updates instead.
+  @override
+  void notifyListeners() {
+    if (_disposed) return;
+    super.notifyListeners();
   }
 
   void _onForegroundTaskData(Object data) {
