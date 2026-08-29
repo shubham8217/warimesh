@@ -184,4 +184,77 @@ void main() {
       expect(stored.latitude, closeTo(17.679076, 1e-9));
     });
   });
+
+  group('help_points table', () {
+    HelpPointRecord record(int msgId, {int helpType = kStationMedical, bool mine = false}) => HelpPointRecord(
+          msgId: msgId,
+          helpType: helpType,
+          senderLabel: 'V7K2M9',
+          senderName: 'Sunita',
+          receivedAt: DateTime.now(),
+          expiresAt: DateTime.now().add(const Duration(hours: 2)),
+          mine: mine,
+        );
+
+    test('a fresh database accepts a help point announcement', () async {
+      await HelpPointsDb.insertIfNew(record(1));
+      final stored = (await HelpPointsDb.all()).firstWhere((h) => h.msgId == 1);
+      expect(stored.helpType, kStationMedical);
+      expect(stored.isOpen, isTrue);
+      expect(stored.isActive, isTrue);
+    });
+
+    test('closing a help point sets status and closedBy, and it drops out of active', () async {
+      await HelpPointsDb.insertIfNew(record(2));
+      await HelpPointsDb.setStatus(2, kHelpStatusClosed, closedBy: 'V7K2M9', closedAt: DateTime.now());
+
+      final stored = (await HelpPointsDb.all()).firstWhere((h) => h.msgId == 2);
+      expect(stored.isClosed, isTrue);
+      expect(stored.closedBy, 'V7K2M9');
+      expect(stored.isActive, isFalse);
+    });
+
+    test('re-hearing the same announcement never clobbers a status already set', () async {
+      // Same reasoning as the alerts-table test above: the sender re-airs
+      // the announcement for its whole airtime, so insertIfNew runs
+      // repeatedly for the same help point.
+      await HelpPointsDb.insertIfNew(record(3));
+      await HelpPointsDb.setStatus(3, kHelpStatusLimited);
+      await HelpPointsDb.insertIfNew(record(3));
+
+      final stored = (await HelpPointsDb.all()).firstWhere((h) => h.msgId == 3);
+      expect(stored.isLimited, isTrue);
+    });
+
+    test('"I\'m going there" persists locally', () async {
+      await HelpPointsDb.insertIfNew(record(4));
+      await HelpPointsDb.setAcknowledged(4, true);
+      final stored = (await HelpPointsDb.all()).firstWhere((h) => h.msgId == 4);
+      expect(stored.acknowledged, isTrue);
+    });
+
+    test('reapExpired drops only what expired more than a day ago', () async {
+      final fresh = HelpPointRecord(
+        msgId: 5,
+        helpType: kStationWater,
+        senderLabel: 'V7K2M9',
+        receivedAt: DateTime.now(),
+        expiresAt: DateTime.now().add(const Duration(minutes: 5)),
+      );
+      final longExpired = HelpPointRecord(
+        msgId: 6,
+        helpType: kStationWater,
+        senderLabel: 'V7K2M9',
+        receivedAt: DateTime.now().subtract(const Duration(days: 3)),
+        expiresAt: DateTime.now().subtract(const Duration(days: 2)),
+      );
+      await HelpPointsDb.insertIfNew(fresh);
+      await HelpPointsDb.insertIfNew(longExpired);
+      await HelpPointsDb.reapExpired();
+
+      final ids = (await HelpPointsDb.all()).map((h) => h.msgId).toSet();
+      expect(ids.contains(5), isTrue);
+      expect(ids.contains(6), isFalse);
+    });
+  });
 }

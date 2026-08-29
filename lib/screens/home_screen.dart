@@ -258,7 +258,46 @@ class DutyCard extends StatelessWidget {
     kStationFood: Icons.restaurant_outlined,
     kStationLostChildDesk: Icons.child_care_outlined,
     kStationPolice: Icons.local_police_outlined,
+    kStationToilet: Icons.wc_outlined,
+    kStationNightHalt: Icons.bedtime_outlined,
+    kStationCharging: Icons.charging_station_outlined,
+    kStationFirstAid: Icons.health_and_safety_outlined,
+    kStationOther: Icons.info_outline,
   };
+
+  /// One tap, one question, one button — see the note at the top of this
+  /// file's spec ("Wari volunteers may be walking and using phones in
+  /// crowded environments") for why this is a single confirm, not a form.
+  Future<void> _confirmAndAnnounce(BuildContext context, int newStation) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        icon: Icon(_icons[newStation], color: AppColors.relayed, size: 32),
+        title: Text('Announce ${stationLabel(newStation)} Help'),
+        content: Text(
+          '${stationAnnounceLabel(newStation)} will be visible to nearby WariMesh '
+          'users — including phones out of direct range, relayed hop by hop.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Announce'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    onStationChanged(newStation);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('${stationLabel(newStation)} help point is now visible to nearby WariMesh users.'),
+      ));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -300,7 +339,12 @@ class DutyCard extends StatelessWidget {
                 ),
                 if (onDuty)
                   TextButton(
-                    onPressed: () => onStationChanged(kStationNone),
+                    onPressed: () {
+                      onStationChanged(kStationNone);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Help point closed.')),
+                      );
+                    },
                     child: const Text('Off duty'),
                   ),
               ],
@@ -315,7 +359,13 @@ class DutyCard extends StatelessWidget {
                     avatar: Icon(_icons[s], size: 17),
                     label: Text(stationLabel(s)),
                     selected: station == s,
-                    onSelected: (sel) => onStationChanged(sel ? s : kStationNone),
+                    onSelected: (sel) {
+                      if (!sel) {
+                        onStationChanged(kStationNone);
+                        return;
+                      }
+                      _confirmAndAnnounce(context, s);
+                    },
                   ),
               ],
             ),

@@ -122,4 +122,18 @@ void main() {
     ));
     expect((await AlertsDb.all()).any((a) => a.msgId == 777), isTrue);
   });
+
+  test('help_points (introduced at v9) exists on a database upgraded from v2', () async {
+    // Same failure mode this whole file guards against, one migration step
+    // later: a database that never saw v9's onUpgrade branch must still end
+    // up with a usable help_points table.
+    await HelpPointsDb.insertIfNew(HelpPointRecord(
+      msgId: 888,
+      helpType: kStationMedical,
+      senderLabel: 'V7K2M9',
+      receivedAt: DateTime.now(),
+      expiresAt: DateTime.now().add(const Duration(hours: 2)),
+    ));
+    expect((await HelpPointsDb.all()).any((h) => h.msgId == 888), isTrue);
+  });
 }

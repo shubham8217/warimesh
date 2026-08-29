@@ -419,4 +419,158 @@ void main() {
       expect(() => frag('पाणी इथे आहे').head.encode(), returnsNormally);
     });
   });
+
+  group('HelpPointPacket — the Wari Seva Network', () {
+    test('round-trips every defined station and fits one advertisement', () {
+      for (final station in kStationTypes.where((s) => s != kStationNone)) {
+        final packet = HelpPointPacket(
+          ttl: kDefaultTtl,
+          msgId: 3141592653,
+          helpType: station,
+          senderLabel: 'V7K2M9',
+          status: kHelpStatusOpen,
+          expiresInMinutesDiv5: 24,
+        );
+        final bytes = packet.encode();
+        expect(bytes.length, kHelpPointPacketLength);
+        expect(bytes.length, lessThanOrEqualTo(24));
+
+        final decoded = HelpPointPacket.decode(bytes)!;
+        expect(decoded.helpType, station);
+        expect(decoded.msgId, 3141592653);
+        expect(decoded.senderLabel, 'V7K2M9');
+        expect(decoded.status, kHelpStatusOpen);
+        expect(decoded.expiryDuration, const Duration(minutes: 120));
+      }
+    });
+
+    test('carries the LIMITED status', () {
+      final packet = HelpPointPacket(
+        ttl: 2, msgId: 1, helpType: kStationNightHalt, senderLabel: 'V1AAAA', status: kHelpStatusLimited,
+      );
+      expect(HelpPointPacket.decode(packet.encode())!.status, kHelpStatusLimited);
+    });
+
+    test('relaying decrements ttl and preserves identity, type and expiry', () {
+      final original = HelpPointPacket(
+        ttl: kDefaultTtl, msgId: 55, helpType: kStationWater, senderLabel: 'V4B2XY', expiresInMinutesDiv5: 10,
+      );
+      final relayed = original.relayed();
+      expect(relayed.ttl, kDefaultTtl - 1);
+      expect(relayed.msgId, 55);
+      expect(relayed.helpType, kStationWater);
+      expect(relayed.senderLabel, 'V4B2XY');
+      expect(relayed.expiresInMinutesDiv5, 10);
+    });
+
+    test('rejects kStationNone — an announcement must name a real help type', () {
+      final bytes = HelpPointPacket(ttl: 2, msgId: 1, helpType: kStationMedical, senderLabel: 'V1AAAA').encode();
+      bytes[6] = kStationNone;
+      expect(HelpPointPacket.decode(bytes), isNull);
+    });
+
+    test('an unknown help type from a newer build is rejected rather than shown as something undefined', () {
+      final bytes = HelpPointPacket(ttl: 2, msgId: 1, helpType: kStationMedical, senderLabel: 'V1AAAA').encode();
+      bytes[6] = 200;
+      expect(HelpPointPacket.decode(bytes), isNull);
+    });
+
+    test('rejects a packet of the wrong type and anything truncated', () {
+      final alert = MeshPacket(ttl: 2, msgId: 7, category: kCategorySos, senderLabel: 'W7K2M9').encode();
+      expect(HelpPointPacket.decode(alert), isNull);
+      final short = HelpPointPacket(ttl: 2, msgId: 1, helpType: kStationMedical, senderLabel: 'V1AAAA')
+          .encode()
+          .sublist(0, kHelpPointPacketLength - 1);
+      expect(HelpPointPacket.decode(short), isNull);
+    });
+  });
+
+  group('HelpPointStatusPacket — closing or updating a help point', () {
+    test('round-trips CLOSED and LIMITED and fits one advertisement', () {
+      for (final status in [kHelpStatusClosed, kHelpStatusLimited]) {
+        final packet = HelpPointStatusPacket(msgId: 42, updaterMeshId: 'V4B2XY', status: status);
+        final bytes = packet.encode();
+        expect(bytes.length, kHelpPointStatusPacketLength);
+        expect(bytes.length, lessThanOrEqualTo(24));
+
+        final decoded = HelpPointStatusPacket.decode(bytes)!;
+        expect(decoded.msgId, 42);
+        expect(decoded.updaterMeshId, 'V4B2XY');
+        expect(decoded.status, status);
+      }
+    });
+
+    test('an unknown status code degrades to CLOSED rather than OPEN', () {
+      // Same direction of caution as ResolvePacket's unknown-reason test:
+      // never let a corrupt or newer-build byte read as "still open", which
+      // would send someone walking towards a help point that said it's shut.
+      final bytes = HelpPointStatusPacket(msgId: 1, updaterMeshId: 'VZZZZZ').encode();
+      bytes[11] = 9;
+      expect(HelpPointStatusPacket.decode(bytes)!.status, kHelpStatusClosed);
+    });
+
+    test('a blank updater id is rejected rather than attributed to nobody', () {
+      final bytes = HelpPointStatusPacket(msgId: 7, updaterMeshId: '      ').encode();
+      expect(HelpPointStatusPacket.decode(bytes), isNull);
+    });
+
+    test('rejects a packet of the wrong type and anything truncated', () {
+      final ack = AckPacket(msgId: 7, responderMeshId: 'V11111').encode();
+      expect(HelpPointStatusPacket.decode(ack), isNull);
+      final short = HelpPointStatusPacket(msgId: 1, updaterMeshId: 'V1AAAA')
+          .encode()
+          .sublist(0, kHelpPointStatusPacketLength - 1);
+      expect(HelpPointStatusPacket.decode(short), isNull);
+    });
+  });
+
+  group('HelpPointRecord', () {
+    test('isActive is false once closed, even before expiry', () {
+      final point = HelpPointRecord(
+        msgId: 1,
+        helpType: kStationMedical,
+        senderLabel: 'V7K2M9',
+        receivedAt: DateTime.now(),
+        expiresAt: DateTime.now().add(const Duration(hours: 1)),
+        status: kHelpStatusClosed,
+      );
+      expect(point.isActive, isFalse);
+    });
+
+    test('isActive is false once expired, even if never explicitly closed', () {
+      final point = HelpPointRecord(
+        msgId: 1,
+        helpType: kStationMedical,
+        senderLabel: 'V7K2M9',
+        receivedAt: DateTime.now().subtract(const Duration(hours: 3)),
+        expiresAt: DateTime.now().subtract(const Duration(minutes: 1)),
+      );
+      expect(point.isExpired, isTrue);
+      expect(point.isActive, isFalse);
+    });
+
+    test('a night halt gets a longer default expiry than other stations', () {
+      expect(helpPointDefaultExpiry(kStationNightHalt), greaterThan(helpPointDefaultExpiry(kStationMedical)));
+    });
+
+    test('survives a round-trip through the database map', () {
+      final original = HelpPointRecord(
+        msgId: 12345,
+        helpType: kStationPolice,
+        senderLabel: 'V7K2M9',
+        senderName: 'Sunita',
+        receivedAt: DateTime.now(),
+        expiresAt: DateTime.now().add(const Duration(hours: 2)),
+        hops: 2,
+        status: kHelpStatusLimited,
+      )..acknowledged = true;
+
+      final restored = HelpPointRecord.fromMap(original.toMap().cast<String, Object?>());
+      expect(restored.msgId, 12345);
+      expect(restored.helpType, kStationPolice);
+      expect(restored.hops, 2);
+      expect(restored.isLimited, isTrue);
+      expect(restored.acknowledged, isTrue);
+    });
+  });
 }

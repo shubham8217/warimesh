@@ -16,7 +16,7 @@ import 'models.dart';
 
 class AppDatabase {
   static Database? _db;
-  static const int _version = 8;
+  static const int _version = 9;
 
   /// The database filename. A constant in the app; overridable only so that
   /// test files can each own their own file.
@@ -43,6 +43,7 @@ class AppDatabase {
         await _createKnownDindis(db);
         await _createMessages(db);
         await _createAlerts(db);
+        await _createHelpPoints(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -79,6 +80,9 @@ class AppDatabase {
           // claim to be a medical point because of a migration.
           await _addColumnIfMissing(
               db, 'volunteer_profile', 'station', 'INTEGER NOT NULL DEFAULT 0');
+        }
+        if (oldVersion < 9) {
+          await _createHelpPoints(db);
         }
       },
     );
@@ -144,6 +148,30 @@ class AppDatabase {
         resolved_by TEXT,
         resolved_reason INTEGER,
         resolved_at INTEGER
+      )
+    """);
+  }
+
+  /// The Wari Seva Network's storage — see [HelpPointRecord] for why this
+  /// is a durable table and not just an in-memory list, same reasoning as
+  /// _createAlerts above. closed_by/closed_at mirror resolved_by/resolved_at
+  /// on the alerts table on purpose: a HELP_POINT_STATUS_UPDATE is the
+  /// HELP_POINT equivalent of a RESOLVE.
+  static Future<void> _createHelpPoints(Database db) async {
+    await db.execute("""
+      CREATE TABLE IF NOT EXISTS help_points (
+        msg_id INTEGER PRIMARY KEY,
+        help_type INTEGER NOT NULL,
+        sender_label TEXT NOT NULL,
+        sender_name TEXT,
+        received_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        hops INTEGER NOT NULL DEFAULT 0,
+        mine INTEGER NOT NULL DEFAULT 0,
+        status INTEGER NOT NULL DEFAULT 0,
+        closed_by TEXT,
+        closed_at INTEGER,
+        acknowledged INTEGER NOT NULL DEFAULT 0
       )
     """);
   }
@@ -250,15 +278,34 @@ class SeenMessagesDb {
     return rows.isNotEmpty;
   }
 
-  static Future<void> markSeen(MeshPacket packet) async {
+  static Future<void> markSeen(MeshPacket packet) => markSeenRaw(
+        packet.msgId,
+        category: packet.category,
+        senderLabel: packet.senderLabel,
+        ttl: packet.ttl,
+      );
+
+  /// The generic form [markSeen] delegates to. [hasSeen] above was already
+  /// keyed on msgId alone, so it works unmodified for any packet kind — only
+  /// the write side was tied to [MeshPacket]. HELP_POINT reuses this same
+  /// ledger for dedup/loop-prevention rather than keeping a second one; the
+  /// `category` column is diagnostic only (see seen_messages' one caller,
+  /// which is dedup-by-msg_id and nothing else) so a HELP_POINT packet type
+  /// fits it fine.
+  static Future<void> markSeenRaw(
+    int msgId, {
+    required int category,
+    required String senderLabel,
+    required int ttl,
+  }) async {
     final db = await AppDatabase.instance;
     await db.insert(
       'seen_messages',
       {
-        'msg_id': packet.msgId,
-        'category': packet.category,
-        'sender_label': packet.senderLabel,
-        'ttl_at_capture': packet.ttl,
+        'msg_id': msgId,
+        'category': category,
+        'sender_label': senderLabel,
+        'ttl_at_capture': ttl,
         'captured_at': DateTime.now().millisecondsSinceEpoch,
         'synced': 0,
       },
@@ -363,6 +410,74 @@ class AlertsDb {
     final db = await AppDatabase.instance;
     final rows = await db.query('alerts', orderBy: 'received_at DESC', limit: 200);
     return rows.map(AlertRecord.fromMap).toList();
+  }
+}
+
+// ===================== help_points =====================
+
+/// The Wari Seva Network's storage. See [HelpPointRecord] for why help
+/// points are stored rather than merely notified — same reasoning as
+/// [AlertsDb].
+class HelpPointsDb {
+  /// Records a help point if it's new. Deliberately does NOT overwrite an
+  /// existing row — the same announcement arrives repeatedly as neighbours
+  /// re-air it (see kHelpPointAirtime in mesh_service.dart), and clobbering
+  /// the row each time would wipe a status change or an "I'm going there"
+  /// someone already recorded locally.
+  static Future<void> insertIfNew(HelpPointRecord record) async {
+    final db = await AppDatabase.instance;
+    await db.insert(
+      'help_points',
+      record.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+  }
+
+  static Future<void> setStatus(int msgId, int status, {String? closedBy, DateTime? closedAt}) async {
+    final db = await AppDatabase.instance;
+    await db.update(
+      'help_points',
+      {
+        'status': status,
+        'closed_by': closedBy,
+        'closed_at': closedAt?.millisecondsSinceEpoch,
+      },
+      where: 'msg_id = ?',
+      whereArgs: [msgId],
+    );
+  }
+
+  static Future<void> setAcknowledged(int msgId, bool value) async {
+    final db = await AppDatabase.instance;
+    await db.update(
+      'help_points',
+      {'acknowledged': value ? 1 : 0},
+      where: 'msg_id = ?',
+      whereArgs: [msgId],
+    );
+  }
+
+  /// Drops rows that expired more than a day ago. Run at bootstrap and
+  /// whenever the list is reloaded — see the note on [AlertRecord] for why
+  /// an alert is never deleted (a resolved SOS is still history worth
+  /// keeping), but a help point is different: once it is stale there is
+  /// nothing useful left to show and no reason to keep it forever. The
+  /// one-day grace period, rather than deleting the instant it expires, is
+  /// just so a volunteer who reopens the app minutes after a slightly-late
+  /// expiry still sees what was there.
+  static Future<void> reapExpired() async {
+    final db = await AppDatabase.instance;
+    final cutoff = DateTime.now().subtract(const Duration(days: 1)).millisecondsSinceEpoch;
+    await db.delete('help_points', where: 'expires_at < ?', whereArgs: [cutoff]);
+  }
+
+  /// The whole table, newest first. Filtering into "active now" happens in
+  /// the UI/mesh layer against [HelpPointRecord.isActive], since expiry is a
+  /// live computation, not something worth re-querying for.
+  static Future<List<HelpPointRecord>> all() async {
+    final db = await AppDatabase.instance;
+    final rows = await db.query('help_points', orderBy: 'received_at DESC', limit: 200);
+    return rows.map(HelpPointRecord.fromMap).toList();
   }
 }
 

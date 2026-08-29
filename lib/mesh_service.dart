@@ -81,6 +81,17 @@ const int kPriorityAlert = 2;
 // exactly as much as the alert it answers.
 const Duration kResponseAirtime = Duration(seconds: 45);
 
+// HELP_POINT — the Wari Seva Network. Airtime/priority mirror the alert
+// tier reasoning above: an announcement is worth carrying as long as an
+// alert (kAlertAirtime/kRelayAirtime) since "where is the medical tent" is
+// exactly the kind of thing a screen-off receiver must not miss, but it
+// must never outrank an actual SOS. It shares the alert priority tier for
+// that reason — same relationship kResponseAirtime has to alerts above.
+const int kPriorityHelpPoint = kPriorityAlert;
+const Duration kHelpPointAirtime = Duration(seconds: 60); // a help point we announced
+const Duration kHelpPointRelayAirtime = Duration(seconds: 45); // one we're passing on
+const Duration kHelpPointStatusAirtime = Duration(seconds: 45); // a close/status update
+
 /// One payload this phone is currently putting on the air, and until when.
 ///
 /// [key] identifies the payload so re-registering the same alert refreshes
@@ -224,6 +235,24 @@ class MeshService extends ChangeNotifier {
 
   int get unclaimedCount => alerts.where((a) => a.isOpen && !a.mine).length;
 
+  /// The Wari Seva Network's durable queue — every HELP_POINT this phone has
+  /// announced or received, mirroring how [alerts] backs the SOS queue.
+  /// Loaded from SQLite at bootstrap; see [HelpPointRecord].
+  final List<HelpPointRecord> helpPoints = [];
+
+  /// Help points worth showing right now: not closed, not expired. This is
+  /// what "Nearby Seva" on the Home screen renders — see HelpPointRecord.isActive.
+  List<HelpPointRecord> get activeHelpPoints {
+    final points = helpPoints.where((h) => h.isActive).toList();
+    points.sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
+    return points;
+  }
+
+  /// The msgId of the help point THIS phone currently has announced, if
+  /// any — what "Off duty" (or switching to a different station) has to
+  /// close. Null when this phone isn't currently a help point.
+  int? _myActiveHelpPointMsgId;
+
   static int _byTriage(AlertRecord a, AlertRecord b) {
     final rank = a.triageRank.compareTo(b.triageRank);
     if (rank != 0) return rank;
@@ -364,8 +393,20 @@ class MeshService extends ChangeNotifier {
   /// Goes on or off duty at a help point. Takes effect on the next presence
   /// beacon, and re-airs one immediately so a volunteer who has just opened
   /// the water tent doesn't stay invisible for up to 15 seconds.
+  ///
+  /// This drives two independent signals, not one: the ambient presence
+  /// beacon above (single-hop, dies quietly 45s after this phone stops
+  /// sending it — see kPresenceExpiry) keeps working exactly as before, and
+  /// is now joined by a relayed [HelpPointPacket] announcement (multi-hop,
+  /// explicitly closed, durable) — see the note on kHelpPointPacketType in
+  /// models.dart for why one beacon can't do both jobs. Switching stations
+  /// closes the old announcement before opening the new one, and going off
+  /// duty closes it outright.
   void setStation(int station) {
     if (_myStation == station) return;
+    if (_myActiveHelpPointMsgId != null) {
+      _closeHelpPoint(_myActiveHelpPointMsgId!);
+    }
     _myStation = station;
     appendLog(
       station == kStationNone
@@ -374,7 +415,113 @@ class MeshService extends ChangeNotifier {
       'Sent',
     );
     _broadcastPresence();
+    if (station != kStationNone) {
+      unawaited(_announceHelpPoint(station));
+    }
     notifyListeners();
+  }
+
+  /// Puts one HELP_POINT announcement on the air and files it into
+  /// [helpPoints] as our own. Public entry point is [setStation] — this is
+  /// also what re-arms the announcement at bootstrap for a volunteer whose
+  /// duty state survived an app restart (see bootstrap()).
+  Future<void> _announceHelpPoint(int helpType, {int status = kHelpStatusOpen}) async {
+    final msgId = Random().nextInt(0xFFFFFFFF);
+    final packet = HelpPointPacket(
+      ttl: kDefaultTtl,
+      msgId: msgId,
+      helpType: helpType,
+      status: status,
+      senderLabel: deviceLabel,
+      expiresInMinutesDiv5: (helpPointDefaultExpiry(helpType).inMinutes ~/ 5).clamp(1, 255),
+    );
+    await SeenMessagesDb.markSeenRaw(
+      msgId, category: kHelpPointPacketType, senderLabel: deviceLabel, ttl: kDefaultTtl,
+    );
+
+    if (peripheralSupported && bluetoothOn) {
+      _queueBroadcast('helppoint:$msgId', packet.encode(), kHelpPointAirtime,
+          priority: kPriorityHelpPoint);
+      appendLog('Announced ${stationLabel(helpType)} help point — visible to nearby WariMesh users', 'Sent');
+    } else {
+      appendLog(
+        'On duty as ${stationLabel(helpType)}, but this phone cannot broadcast — nobody will see it',
+        'Warning',
+      );
+    }
+
+    _myActiveHelpPointMsgId = msgId;
+    final record = HelpPointRecord(
+      msgId: msgId,
+      helpType: helpType,
+      senderLabel: deviceLabel,
+      senderName: _myName,
+      receivedAt: DateTime.now(),
+      expiresAt: DateTime.now().add(packet.expiryDuration),
+      hops: 0,
+      mine: true,
+      status: status,
+    );
+    try {
+      await HelpPointsDb.insertIfNew(record);
+      await loadHelpPoints();
+    } catch (e) {
+      appendLog('Could not file this help point: $e', 'Warning');
+    }
+  }
+
+  /// Closes a help point this phone announced — see the note above
+  /// kHelpPointPacketType for why this exists as an explicit broadcast
+  /// rather than only relying on expiry.
+  void _closeHelpPoint(int msgId) {
+    _myActiveHelpPointMsgId = null;
+    _cancelBroadcast('helppoint:$msgId');
+    unawaited(() async {
+      try {
+        await HelpPointsDb.setStatus(msgId, kHelpStatusClosed,
+            closedBy: deviceLabel, closedAt: DateTime.now());
+        await loadHelpPoints();
+      } catch (e) {
+        appendLog('Could not close this help point: $e', 'Warning');
+      }
+    }());
+
+    final packet = HelpPointStatusPacket(
+      msgId: msgId, updaterMeshId: deviceLabel, status: kHelpStatusClosed,
+    );
+    if (peripheralSupported && bluetoothOn) {
+      _queueBroadcast('hpstatus:$msgId', packet.encode(), kHelpPointStatusAirtime,
+          priority: kPriorityHelpPoint);
+      appendLog('Help point closed — nearby phones told', 'Sent');
+    } else {
+      appendLog('Help point closed on this phone only — cannot broadcast', 'Warning');
+    }
+  }
+
+  /// Reloads the Wari Seva Network queue from SQLite, dropping anything
+  /// that expired more than a day ago first. Mirrors [loadAlerts].
+  Future<void> loadHelpPoints() async {
+    try {
+      await HelpPointsDb.reapExpired();
+      final rows = await HelpPointsDb.all();
+      helpPoints
+        ..clear()
+        ..addAll(rows);
+      notifyListeners();
+    } catch (e) {
+      appendLog('Could not load nearby seva: $e', 'Warning');
+    }
+  }
+
+  /// "I'm going there" — a private note to self, never broadcast. See the
+  /// note on [HelpPointRecord.acknowledged].
+  Future<void> acknowledgeHelpPoint(HelpPointRecord point) async {
+    try {
+      await HelpPointsDb.setAcknowledged(point.msgId, true);
+      await loadHelpPoints();
+    } catch (e) {
+      appendLog('Could not save that: $e', 'Warning');
+    }
   }
 
   Future<void> bootstrap(UserProfile profile) async {
@@ -406,6 +553,7 @@ class MeshService extends ChangeNotifier {
       await AppDatabase.instance; // ensure tables exist
       await refreshSeenCount();
       await loadAlerts();
+      await loadHelpPoints();
     } catch (e) {
       appendLog('Local database unavailable — activity won\'t persist: $e', 'Warning');
     }
@@ -476,6 +624,16 @@ class MeshService extends ChangeNotifier {
     _startPresenceBroadcast();
     _startScanWatchdog();
     _startLifecycleWatch();
+
+    // A volunteer's duty state survives an app restart (see UserProfile —
+    // station is persisted), but the HELP_POINT announcement itself does
+    // not: it was never on the air on this boot until now. Re-arm it so a
+    // volunteer who has been at the medical tent since 5am and just had
+    // their phone restart doesn't silently drop off "Nearby Seva" for
+    // everyone else.
+    if (_myStation != kStationNone) {
+      unawaited(_announceHelpPoint(_myStation));
+    }
   }
 
   /// Android can quietly end a scan without telling the app — a Bluetooth
@@ -896,6 +1054,18 @@ class MeshService extends ChangeNotifier {
         continue;
       }
 
+      if (data[0] == kHelpPointPacketType) {
+        final hp = HelpPointPacket.decode(data);
+        if (hp != null) unawaited(_handleHelpPointPacket(hp));
+        continue;
+      }
+
+      if (data[0] == kHelpPointStatusPacketType) {
+        final hpStatus = HelpPointStatusPacket.decode(data);
+        if (hpStatus != null) unawaited(_handleHelpPointStatus(hpStatus));
+        continue;
+      }
+
       final packet = MeshPacket.decode(data);
       if (packet == null) continue;
       unawaited(_handleReceivedPacket(packet));
@@ -1141,6 +1311,76 @@ class MeshService extends ChangeNotifier {
     }
 
     _relayResponse('res:${res.msgId}', res.encode());
+  }
+
+  /// Receives a HELP_POINT announcement — files it, and relays it exactly
+  /// like an ALERT (TTL/dedup/jitter), since it needs to reach a phone that
+  /// may be several hops from the volunteer who announced it. See the note
+  /// on kHelpPointPacketType for why this can't just be a PresencePacket.
+  Future<void> _handleHelpPointPacket(HelpPointPacket packet) async {
+    if (packet.senderLabel == deviceLabel) return; // our own, echoed back
+
+    final alreadySeen = await SeenMessagesDb.hasSeen(packet.msgId);
+    if (alreadySeen) return; // dedup — also the loop-prevention mechanism
+    await SeenMessagesDb.markSeenRaw(
+      packet.msgId, category: kHelpPointPacketType, senderLabel: packet.senderLabel, ttl: packet.ttl,
+    );
+
+    appendLog(
+      'Received ${stationLabel(packet.helpType)} help point from ${packet.senderLabel} (TTL ${packet.ttl})',
+      'Received',
+    );
+
+    try {
+      await HelpPointsDb.insertIfNew(HelpPointRecord(
+        msgId: packet.msgId,
+        helpType: packet.helpType,
+        senderLabel: packet.senderLabel,
+        senderName: nameFor(packet.senderLabel),
+        receivedAt: DateTime.now(),
+        expiresAt: DateTime.now().add(packet.expiryDuration),
+        hops: kDefaultTtl - packet.ttl,
+        mine: false,
+        status: packet.status,
+      ));
+      await loadHelpPoints();
+    } catch (e) {
+      appendLog('Could not file this help point: $e', 'Warning');
+    }
+
+    if (packet.ttl > 0) {
+      final jitterMs = 300 + Random().nextInt(501); // 300–800ms, same as alert relay
+      await Future.delayed(Duration(milliseconds: jitterMs));
+      final relayed = packet.relayed();
+      _queueBroadcast('helppoint:${relayed.msgId}', relayed.encode(), kHelpPointRelayAirtime,
+          priority: kPriorityHelpPoint);
+      appendLog('Relayed help point via $deviceLabel (TTL now ${relayed.ttl})', 'Relayed');
+    } else {
+      appendLog('Final hop reached $deviceLabel — help point not relayed further', 'Final hop');
+    }
+  }
+
+  /// Receives a close/status update for a help point — the HELP_POINT
+  /// counterpart to [_handleResolve]. No TTL (see kHelpPointStatusPacketType),
+  /// so relay-once-per-phone via [_relayedResponses] bounds the flood.
+  Future<void> _handleHelpPointStatus(HelpPointStatusPacket packet) async {
+    if (packet.updaterMeshId == deviceLabel) return; // our own, echoed back
+
+    try {
+      await HelpPointsDb.setStatus(
+        packet.msgId, packet.status,
+        closedBy: packet.updaterMeshId, closedAt: DateTime.now(),
+      );
+      await loadHelpPoints();
+      appendLog(
+        '${helpStatusLabel(packet.status)}: help point #${packet.msgId} updated by ${packet.updaterMeshId}',
+        'Received',
+      );
+    } catch (e) {
+      appendLog('Could not update this help point: $e', 'Warning');
+    }
+
+    _relayResponse('hpstatus:${packet.msgId}', packet.encode());
   }
 
   /// Passes a response packet on once, for the same reasons an alert is

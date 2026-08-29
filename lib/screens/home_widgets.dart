@@ -100,6 +100,86 @@ class HelpPointsCard extends StatelessWidget {
   }
 }
 
+/// "Nearby Seva" — help points reached over the mesh, potentially several
+/// hops from the volunteer who announced them. This is the Wari Seva
+/// Network's home-screen face: [HelpPointsCard] above shows what THIS
+/// phone's radio can hear right this second (single-hop, no status, no
+/// close); this shows the durable, relayed, closeable kind (see
+/// HelpPointRecord in models.dart) — which is what actually answers "where
+/// is the nearest medical tent" for someone who isn't standing next to it.
+///
+/// Deliberately calm rather than a dashboard: one icon, one status word, one
+/// freshness label per row. "Received through WariMesh" — never a distance,
+/// per the same no-location rule as HelpPointsCard.
+class NearbySevaCard extends StatelessWidget {
+  final List<HelpPointRecord> points;
+  final ValueChanged<HelpPointRecord> onTap;
+
+  const NearbySevaCard({super.key, required this.points, required this.onTap});
+
+  static const Map<int, IconData> _icons = {
+    kStationMedical: Icons.medical_services,
+    kStationWater: Icons.water_drop,
+    kStationFood: Icons.restaurant,
+    kStationLostChildDesk: Icons.child_care,
+    kStationPolice: Icons.local_police,
+    kStationToilet: Icons.wc,
+    kStationNightHalt: Icons.bedtime,
+    kStationCharging: Icons.charging_station,
+    kStationFirstAid: Icons.health_and_safety,
+    kStationOther: Icons.info,
+  };
+
+  static Color _statusColor(HelpPointRecord p) =>
+      p.isLimited ? AppColors.warning : AppColors.relayed;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+
+    if (points.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.volunteer_activism_outlined, size: 20, color: muted),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text('Listening for nearby seva...', style: Theme.of(context).textTheme.bodySmall),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Card(
+      child: Column(
+        children: [
+          for (final point in points)
+            ListTile(
+              onTap: () => onTap(point),
+              leading: CircleAvatar(
+                radius: 20,
+                backgroundColor: _statusColor(point).withValues(alpha: 0.12),
+                child: Icon(_icons[point.helpType] ?? Icons.help_outline, color: _statusColor(point)),
+              ),
+              title: Text(point.label, style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text(
+                '${helpStatusLabel(point.status)} · ${point.freshnessLabel}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: muted),
+              ),
+              trailing: const Icon(Icons.chevron_right),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 /// What happened to the alert you sent.
 ///
 /// Before ACK packets existed, pressing SOS ended in a confirmation screen

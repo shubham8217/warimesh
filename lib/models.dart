@@ -195,6 +195,17 @@ const int kStationWater = 2;
 const int kStationFood = 3;
 const int kStationLostChildDesk = 4;
 const int kStationPolice = 5;
+// Added for the Wari Seva Network (HelpPointPacket) — kept in the same byte
+// space as the original five so one station code works for both the ambient
+// presence beacon and the relayed HELP_POINT packet. See kHelpPointTypes in
+// mesh_service.dart's HelpPointRecord for future extensibility (crowd
+// density, ambulance, route diversions, …) this list is designed to grow
+// into without a wire-format change — station is already just a byte.
+const int kStationToilet = 6;
+const int kStationNightHalt = 7;
+const int kStationCharging = 8;
+const int kStationFirstAid = 9;
+const int kStationOther = 10;
 
 const List<int> kStationTypes = [
   kStationNone,
@@ -203,6 +214,11 @@ const List<int> kStationTypes = [
   kStationFood,
   kStationLostChildDesk,
   kStationPolice,
+  kStationToilet,
+  kStationNightHalt,
+  kStationCharging,
+  kStationFirstAid,
+  kStationOther,
 ];
 
 String stationLabel(int station) {
@@ -217,9 +233,292 @@ String stationLabel(int station) {
       return 'Lost child desk';
     case kStationPolice:
       return 'Police';
+    case kStationToilet:
+      return 'Toilet';
+    case kStationNightHalt:
+      return 'Night halt';
+    case kStationCharging:
+      return 'Charging';
+    case kStationFirstAid:
+      return 'First aid';
+    case kStationOther:
+      return 'Help point';
     default:
       return 'Not at a help point';
   }
+}
+
+/// A short, one-line icon-free description used where a full label reads
+/// too formally — e.g. a confirmation dialog. Kept separate from
+/// [stationLabel] so that one can stay a plain noun (good for chips) while
+/// this can read like a sentence fragment.
+String stationAnnounceLabel(int station) => '${stationLabel(station)} help';
+
+// ---------------------------------------------------------------------------
+// HELP_POINT — the Wari Seva Network.
+//
+// A volunteer's phone going on duty (see setStation in mesh_service.dart)
+// already broadcasts a PresencePacket carrying its station, but that beacon
+// is deliberately single-hop and carries no notion of "closed" or "expired"
+// — it simply goes quiet 45s after the phone stops sending it (see
+// kPresenceExpiry). That's the right behaviour for "is a phone physically
+// near me right now", but it is the wrong behaviour for "where is the
+// nearest medical tent", which has to survive relay through phones that are
+// not the volunteer's, and has to be explicitly closeable — a volunteer
+// packing up a water point should be able to say so once, and have that
+// travel exactly like a RESOLVE for an alert (see kResolvePacketType) rather
+// than just letting the beacon time out for everyone.
+//
+// So HELP_POINT (9) rides the same relay machinery as an ALERT: a unique
+// msgId, a TTL that decrements per hop, and dedup against seen_messages
+// (see SeenMessagesDb.hasSeen — already keyed on msgId alone, so it works
+// unmodified here). HELP_POINT_STATUS_UPDATE (10) closes/updates it, mirroring
+// RESOLVE.
+//
+// Deliberately NOT carrying a location: see the note on kLocationPacketType
+// for why a *chosen* disclosure (an SOS) is a different privacy proposition
+// from a standing one, and PresencePacket above for why the mesh already
+// treats "can I hear it at all" as the proximity signal for exactly this
+// kind of beacon. HELP_POINT follows the same rule.
+const int kHelpPointPacketType = 9;
+const int kHelpPointPacketLength = 1 + 1 + 4 + 1 + 1 + 6 + 1; // 15 bytes — same budget as MeshPacket
+
+const int kHelpStatusOpen = 0;
+const int kHelpStatusClosed = 1;
+const int kHelpStatusLimited = 2;
+
+String helpStatusLabel(int status) {
+  switch (status) {
+    case kHelpStatusClosed:
+      return 'Closed';
+    case kHelpStatusLimited:
+      return 'Limited space';
+    default:
+      return 'Open';
+  }
+}
+
+/// How long a freshly-announced help point stays valid before it is dropped
+/// even if nobody ever closes it — the "temporary" in temporary help point.
+/// A night halt is meant to stand for hours; most other stations are worth
+/// re-confirming sooner, since a volunteer may simply have walked off
+/// without remembering to go off duty.
+Duration helpPointDefaultExpiry(int helpType) {
+  switch (helpType) {
+    case kStationNightHalt:
+      return const Duration(hours: 12);
+    default:
+      return const Duration(hours: 2);
+  }
+}
+
+/// "Medical help available here" — announced by a volunteer's phone,
+/// relayed hop by hop exactly like an SOS. [expiresInMinutesDiv5] is coarse
+/// on purpose: one byte covers over 21 hours at 5-minute resolution, which
+/// is more than any help point on the Wari needs.
+class HelpPointPacket {
+  final int ttl;
+  final int msgId;
+  final int helpType;
+  final int status;
+  final String senderLabel;
+  final int expiresInMinutesDiv5;
+
+  HelpPointPacket({
+    required this.ttl,
+    required this.msgId,
+    required this.helpType,
+    required this.senderLabel,
+    this.status = kHelpStatusOpen,
+    this.expiresInMinutesDiv5 = 24, // 120 minutes
+  });
+
+  Duration get expiryDuration => Duration(minutes: expiresInMinutesDiv5 * 5);
+
+  Uint8List encode() {
+    final bytes = Uint8List(kHelpPointPacketLength);
+    bytes[0] = kHelpPointPacketType;
+    bytes[1] = ttl & 0xFF;
+    final idBytes = ByteData(4)..setUint32(0, msgId, Endian.big);
+    bytes.setRange(2, 6, idBytes.buffer.asUint8List());
+    bytes[6] = helpType & 0xFF;
+    bytes[7] = status & 0xFF;
+    final label = asciiSafe(senderLabel).padRight(6).substring(0, 6);
+    bytes.setRange(8, 14, ascii.encode(label));
+    bytes[14] = expiresInMinutesDiv5 & 0xFF;
+    return bytes;
+  }
+
+  static HelpPointPacket? decode(List<int> raw) {
+    if (raw.length < kHelpPointPacketLength) return null;
+    if (raw[0] != kHelpPointPacketType) return null;
+    final idBytes = Uint8List.fromList(raw.sublist(2, 6));
+    final msgId = ByteData.sublistView(idBytes).getUint32(0, Endian.big);
+    final helpType = raw[6];
+    final status = raw[7];
+    final label = ascii.decode(raw.sublist(8, 14), allowInvalid: true).trim();
+    if (label.isEmpty) return null;
+    // An unrecognised station code (from a newer build, or a corrupt
+    // advertisement) must not render as a help point of some undefined
+    // kind — see the same guard on PresencePacket.decode.
+    if (!kStationTypes.contains(helpType) || helpType == kStationNone) return null;
+    return HelpPointPacket(
+      ttl: raw[1],
+      msgId: msgId,
+      helpType: helpType,
+      status: status <= kHelpStatusLimited ? status : kHelpStatusOpen,
+      senderLabel: label,
+      expiresInMinutesDiv5: raw[14],
+    );
+  }
+
+  HelpPointPacket relayed() => HelpPointPacket(
+        ttl: ttl - 1,
+        msgId: msgId,
+        helpType: helpType,
+        status: status,
+        senderLabel: senderLabel,
+        expiresInMinutesDiv5: expiresInMinutesDiv5,
+      );
+}
+
+/// "This help point is closed / limited now." The HELP_POINT counterpart to
+/// [ResolvePacket] — see the note above kHelpPointPacketType. Like ACK/
+/// RESOLVE, this carries no TTL: a phone relays a given status update
+/// exactly once (see MeshService._relayedResponses), which bounds the flood
+/// without a hop counter.
+class HelpPointStatusPacket {
+  final int msgId;
+  final String updaterMeshId;
+  final int status;
+
+  HelpPointStatusPacket({
+    required this.msgId,
+    required this.updaterMeshId,
+    this.status = kHelpStatusClosed,
+  });
+
+  Uint8List encode() {
+    final bytes = Uint8List(kHelpPointStatusPacketLength);
+    bytes[0] = kHelpPointStatusPacketType;
+    final idBytes = ByteData(4)..setUint32(0, msgId, Endian.big);
+    bytes.setRange(1, 5, idBytes.buffer.asUint8List());
+    final who = asciiSafe(updaterMeshId).padRight(6).substring(0, 6);
+    bytes.setRange(5, 11, ascii.encode(who));
+    bytes[11] = status & 0xFF;
+    return bytes;
+  }
+
+  static HelpPointStatusPacket? decode(List<int> raw) {
+    if (raw.length < kHelpPointStatusPacketLength) return null;
+    if (raw[0] != kHelpPointStatusPacketType) return null;
+    final idBytes = Uint8List.fromList(raw.sublist(1, 5));
+    final msgId = ByteData.sublistView(idBytes).getUint32(0, Endian.big);
+    final who = ascii.decode(raw.sublist(5, 11), allowInvalid: true).trim();
+    if (who.isEmpty) return null;
+    final status = raw[11];
+    return HelpPointStatusPacket(
+      msgId: msgId,
+      updaterMeshId: who,
+      status: status <= kHelpStatusLimited ? status : kHelpStatusClosed,
+    );
+  }
+}
+
+const int kHelpPointStatusPacketType = 10;
+const int kHelpPointStatusPacketLength = 1 + 4 + 6 + 1; // 12 bytes — same shape as ResolvePacket
+
+/// A help point as stored on this phone — the durable counterpart to
+/// [HelpPointPacket], same relationship [AlertRecord] has to [MeshPacket].
+/// Written for every help point announced here *and* every one received,
+/// so it survives an app restart and so "Nearby Seva" doesn't go blank the
+/// instant the announcing phone falls out of range.
+class HelpPointRecord {
+  final int msgId;
+  final int helpType;
+  final String senderLabel;
+  final String? senderName;
+  final DateTime receivedAt;
+  final DateTime expiresAt;
+  final int hops;
+  final bool mine;
+
+  int status;
+  String? closedBy;
+  DateTime? closedAt;
+
+  /// Set locally when the person taps "I'm going there" — never broadcast,
+  /// never authoritative, just a note to themselves.
+  bool acknowledged;
+
+  HelpPointRecord({
+    required this.msgId,
+    required this.helpType,
+    required this.senderLabel,
+    required this.receivedAt,
+    required this.expiresAt,
+    this.senderName,
+    this.hops = 0,
+    this.mine = false,
+    this.status = kHelpStatusOpen,
+    this.closedBy,
+    this.closedAt,
+    this.acknowledged = false,
+  });
+
+  bool get isOpen => status == kHelpStatusOpen;
+  bool get isClosed => status == kHelpStatusClosed;
+  bool get isLimited => status == kHelpStatusLimited;
+  bool get isExpired => DateTime.now().isAfter(expiresAt);
+
+  /// Whether this belongs in "Nearby Seva" right now.
+  bool get isActive => !isClosed && !isExpired;
+
+  String get label => stationLabel(helpType);
+
+  /// "heard just now" / "heard 2 min ago" — same honesty rule as
+  /// [HelpPoint.freshnessLabel]: a help point announced 90 minutes ago is
+  /// still technically active, but a person deciding whether to walk
+  /// towards it should be able to see how stale that promise is.
+  String get freshnessLabel {
+    final mins = DateTime.now().difference(receivedAt).inMinutes;
+    if (mins < 1) return 'just now';
+    if (mins < 60) return '$mins min ago';
+    final hours = mins ~/ 60;
+    return hours < 24 ? '${hours}h ago' : '${hours ~/ 24}d ago';
+  }
+
+  Map<String, Object?> toMap() => {
+        'msg_id': msgId,
+        'help_type': helpType,
+        'sender_label': senderLabel,
+        'sender_name': senderName,
+        'received_at': receivedAt.millisecondsSinceEpoch,
+        'expires_at': expiresAt.millisecondsSinceEpoch,
+        'hops': hops,
+        'mine': mine ? 1 : 0,
+        'status': status,
+        'closed_by': closedBy,
+        'closed_at': closedAt?.millisecondsSinceEpoch,
+        'acknowledged': acknowledged ? 1 : 0,
+      };
+
+  static HelpPointRecord fromMap(Map<String, Object?> map) => HelpPointRecord(
+        msgId: map['msg_id'] as int,
+        helpType: map['help_type'] as int,
+        senderLabel: map['sender_label'] as String,
+        senderName: map['sender_name'] as String?,
+        receivedAt: DateTime.fromMillisecondsSinceEpoch(map['received_at'] as int),
+        expiresAt: DateTime.fromMillisecondsSinceEpoch(map['expires_at'] as int),
+        hops: (map['hops'] as int?) ?? 0,
+        mine: ((map['mine'] as int?) ?? 0) == 1,
+        status: (map['status'] as int?) ?? kHelpStatusOpen,
+        closedBy: map['closed_by'] as String?,
+        closedAt: map['closed_at'] == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(map['closed_at'] as int),
+        acknowledged: ((map['acknowledged'] as int?) ?? 0) == 1,
+      );
 }
 
 // Alphabet avoids visually-ambiguous characters (0/O, 1/I/L) since a Mesh ID

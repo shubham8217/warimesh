@@ -9,6 +9,8 @@ import '../database_service.dart';
 import '../mesh_service.dart';
 import '../models.dart';
 import '../theme.dart';
+import '../widgets.dart';
+import 'help_point_detail_screen.dart';
 import 'home_widgets.dart';
 
 class WarkariHomeScreen extends StatefulWidget {
@@ -56,7 +58,7 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
     final mesh = widget.mesh;
     final activeMissing = _reports.where((r) => !r.found).length;
     final scanningOk = mesh.scanning && mesh.bluetoothOn;
-    final helpPoints = mesh.helpPointsInRange;
+    final nearbySeva = mesh.activeHelpPoints;
 
     // The most recent alert this phone sent that hasn't been closed — or,
     // if it has, only while it's fresh enough to still be the thing on this
@@ -127,10 +129,16 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
                 const SizedBox(height: 12),
               ],
               StatusBox(bluetoothOn: mesh.bluetoothOn, scanningOk: scanningOk),
-              if (helpPoints.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                HelpPointsCard(points: helpPoints),
-              ],
+              const SizedBox(height: 16),
+              SectionHeader(title: 'Nearby Seva'),
+              NearbySevaCard(
+                points: nearbySeva,
+                onTap: (point) => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => HelpPointDetailScreen(mesh: mesh, point: point),
+                  ),
+                ),
+              ),
               const SizedBox(height: 12),
               DindiCard(
                 groupOrId: widget.warkari.groupOrId,
