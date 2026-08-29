@@ -125,6 +125,60 @@ class IconDataLike {
   const IconDataLike(this.name);
 }
 
+/// WariMesh serves two kinds of people on the same mesh: a [warkari] — a
+/// pilgrim walking the Wari, who mainly needs to send an SOS and see who's
+/// missing — and a [volunteer] — camp/relay staff who also need the mesh
+/// diagnostics, background relay service, and activity log. They sign in
+/// separately (see role_select_screen.dart) and land on different views
+/// (see main.dart's AuthGate).
+enum UserRole {
+  warkari,
+  volunteer;
+
+  String get label => this == UserRole.warkari ? 'Warkari' : 'Volunteer';
+
+  static UserRole fromName(String name) =>
+      UserRole.values.firstWhere((r) => r.name == name, orElse: () => UserRole.volunteer);
+}
+
+/// The locally-registered person using this phone. WariMesh has no server
+/// and no internet dependency, so this is deliberately not an account with
+/// a password — it's an on-device identity card: who's carrying this
+/// phone, so reports and mesh activity can be attributed to a person
+/// instead of just a random device label. Stored only in this phone's own
+/// SQLite database (see database_service.dart).
+class UserProfile {
+  final String name;
+  final String phone;
+  final UserRole role;
+  final String groupOrId; // Dindi/group name for a warkari, volunteer/camp ID for a volunteer
+  final DateTime loggedInAt;
+
+  const UserProfile({
+    required this.name,
+    required this.phone,
+    required this.role,
+    required this.groupOrId,
+    required this.loggedInAt,
+  });
+
+  Map<String, Object?> toMap() => {
+        'name': name,
+        'phone': phone,
+        'role': role.name,
+        'volunteer_id': groupOrId,
+        'logged_in_at': loggedInAt.millisecondsSinceEpoch,
+      };
+
+  static UserProfile fromMap(Map<String, Object?> map) => UserProfile(
+        name: map['name'] as String,
+        phone: map['phone'] as String,
+        role: UserRole.fromName(map['role'] as String? ?? 'volunteer'),
+        groupOrId: map['volunteer_id'] as String,
+        loggedInAt: DateTime.fromMillisecondsSinceEpoch(map['logged_in_at'] as int),
+      );
+}
+
 class LostReport {
   final int? id;
   final String name;

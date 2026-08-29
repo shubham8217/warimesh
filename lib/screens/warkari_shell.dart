@@ -1,23 +1,25 @@
-// WariMesh — bottom-nav shell hosting the three main screens. Owns the
-// single MeshService instance and rebuilds when it changes.
+// WariMesh — bottom-nav shell for a signed-in warkari (pilgrim). Mirrors
+// root_shell.dart (the volunteer shell) but swaps the volunteer dashboard
+// for the trimmed-down WarkariHomeScreen; SOS and Missing are the same
+// screens either role uses.
 import 'package:flutter/material.dart';
 
 import '../mesh_service.dart';
 import '../models.dart';
-import 'home_screen.dart';
 import 'missing_screen.dart';
 import 'sos_screen.dart';
+import 'warkari_home_screen.dart';
 
-class RootShell extends StatefulWidget {
-  final UserProfile volunteer;
+class WarkariShell extends StatefulWidget {
+  final UserProfile warkari;
   final VoidCallback onLogout;
-  const RootShell({super.key, required this.volunteer, required this.onLogout});
+  const WarkariShell({super.key, required this.warkari, required this.onLogout});
 
   @override
-  State<RootShell> createState() => _RootShellState();
+  State<WarkariShell> createState() => _WarkariShellState();
 }
 
-class _RootShellState extends State<RootShell> {
+class _WarkariShellState extends State<WarkariShell> {
   final MeshService mesh = MeshService();
   int _tab = 0;
 
@@ -36,9 +38,9 @@ class _RootShellState extends State<RootShell> {
   @override
   Widget build(BuildContext context) {
     final screens = [
-      HomeScreen(
+      WarkariHomeScreen(
         mesh: mesh,
-        volunteer: widget.volunteer,
+        warkari: widget.warkari,
         onLogout: widget.onLogout,
         onOpenSos: () => setState(() => _tab = 1),
         onOpenMissing: () => setState(() => _tab = 2),

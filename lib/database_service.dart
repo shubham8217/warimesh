@@ -16,7 +16,7 @@ import 'models.dart';
 
 class AppDatabase {
   static Database? _db;
-  static const int _version = 2;
+  static const int _version = 4;
 
   static Future<Database> get instance async {
     if (_db != null) return _db!;
@@ -28,10 +28,20 @@ class AppDatabase {
       onCreate: (db, version) async {
         await _createSeenMessages(db);
         await _createLostReports(db);
+        await _createVolunteerProfile(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           await _createLostReports(db);
+        }
+        if (oldVersion < 3) {
+          await _createVolunteerProfile(db);
+        }
+        if (oldVersion < 4) {
+          // Two sign-in roles now share this table (see UserRole in
+          // models.dart) — a pre-existing row is someone who signed in
+          // before roles existed, i.e. a volunteer.
+          await db.execute("ALTER TABLE volunteer_profile ADD COLUMN role TEXT NOT NULL DEFAULT 'volunteer'");
         }
       },
     );
@@ -47,6 +57,19 @@ class AppDatabase {
         ttl_at_capture INTEGER NOT NULL,
         captured_at INTEGER NOT NULL,
         synced INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+  }
+
+  static Future<void> _createVolunteerProfile(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS volunteer_profile (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        name TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'volunteer',
+        volunteer_id TEXT NOT NULL,
+        logged_in_at INTEGER NOT NULL
       )
     ''');
   }
@@ -157,5 +180,34 @@ class LostReportsDb {
     final db = await AppDatabase.instance;
     final rows = await db.query('lost_reports', orderBy: 'found ASC, created_at DESC');
     return rows.map(LostReport.fromMap).toList();
+  }
+}
+
+// ===================== volunteer_profile =====================
+//
+// Single-row table (id is always 1) — this phone belongs to whichever
+// person (warkari or volunteer — see UserRole) is currently signed in,
+// one at a time.
+
+class UserDb {
+  static Future<void> save(UserProfile profile) async {
+    final db = await AppDatabase.instance;
+    await db.insert(
+      'volunteer_profile',
+      {'id': 1, ...profile.toMap()},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  static Future<UserProfile?> current() async {
+    final db = await AppDatabase.instance;
+    final rows = await db.query('volunteer_profile', where: 'id = 1', limit: 1);
+    if (rows.isEmpty) return null;
+    return UserProfile.fromMap(rows.first);
+  }
+
+  static Future<void> clear() async {
+    final db = await AppDatabase.instance;
+    await db.delete('volunteer_profile', where: 'id = 1');
   }
 }
