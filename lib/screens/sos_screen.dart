@@ -20,7 +20,8 @@ class SosScreen extends StatefulWidget {
 
 enum _SendState { idle, holding, sending, sent }
 
-class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMixin {
+class _SosScreenState extends State<SosScreen>
+    with SingleTickerProviderStateMixin {
   _SendState _state = _SendState.idle;
   double _holdProgress = 0;
   Timer? _holdTimer;
@@ -81,17 +82,30 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
   @override
   Widget build(BuildContext context) {
     final mesh = widget.mesh;
-    final color = _category == kCategorySos ? AppColors.sos : AppColors.lostPerson;
+    final color = _category == kCategorySos
+        ? AppColors.sos
+        : AppColors.lostPerson;
 
     return Column(
       children: [
-        AppBar(title: const Text('Send an alert'), automaticallyImplyLeading: false),
+        AppBar(
+          title: const Text('Send an alert'),
+          automaticallyImplyLeading: false,
+        ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: SegmentedButton<int>(
             segments: const [
-              ButtonSegment(value: kCategorySos, label: Text('SOS'), icon: Icon(Icons.sos)),
-              ButtonSegment(value: kCategoryLostPerson, label: Text('Lost Person'), icon: Icon(Icons.person_search)),
+              ButtonSegment(
+                value: kCategorySos,
+                label: Text('SOS'),
+                icon: Icon(Icons.sos),
+              ),
+              ButtonSegment(
+                value: kCategoryLostPerson,
+                label: Text('Lost Person'),
+                icon: Icon(Icons.person_search),
+              ),
             ],
             selected: {_category},
             onSelectionChanged: _state == _SendState.idle
@@ -114,6 +128,25 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
             ),
           ),
         ),
+        // "SOS SENT / ✓ Alert propagated to your Dindi / ✓ Alert propagated
+        // to nearby volunteers" — see the identical checklist (and its
+        // "propagated, not received" caveat) on MyAlertCard in
+        // home_widgets.dart, which is where this continues once someone
+        // leaves this screen: SOS is never tiered down (see the note in
+        // MeshService._handleReceivedPacket), so both are true for every
+        // SOS sent, not something worth showing per-category status for.
+        if (_lastSent != null &&
+            _state == _SendState.sent &&
+            _category == kCategorySos)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Column(
+              children: const [
+                _SentCheckLine('Alert propagated to your Dindi'),
+                _SentCheckLine('Alert propagated to nearby volunteers'),
+              ],
+            ),
+          ),
         if (_lastSent != null && _state != _SendState.sent)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
@@ -163,7 +196,11 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
                 shape: BoxShape.circle,
                 color: onCooldown ? Colors.grey.shade400 : color,
                 boxShadow: [
-                  BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 30, spreadRadius: 4),
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.35),
+                    blurRadius: 30,
+                    spreadRadius: 4,
+                  ),
                 ],
               ),
               child: Center(
@@ -173,14 +210,22 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            _category == kCategorySos ? Icons.sos : Icons.person_search,
+                            _category == kCategorySos
+                                ? Icons.sos
+                                : Icons.person_search,
                             color: Colors.white,
                             size: 44,
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            onCooldown ? '${widget.mesh.cooldownRemaining.inSeconds + 1}s' : 'HOLD',
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, letterSpacing: 1),
+                            onCooldown
+                                ? '${widget.mesh.cooldownRemaining.inSeconds + 1}s'
+                                : 'HOLD',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1,
+                            ),
                           ),
                         ],
                       ),
@@ -207,13 +252,37 @@ class _SosScreenState extends State<SosScreen> with SingleTickerProviderStateMix
         text = 'Broadcasting over the mesh…';
         break;
       case _SendState.sent:
-        text = '${categoryLabel(_category)} sent · TTL ${_lastSent?.ttl} · msg #${_lastSent?.msgId}';
+        text = _category == kCategorySos
+            ? 'SOS SENT · TTL ${_lastSent?.ttl} · msg #${_lastSent?.msgId}'
+            : '${categoryLabel(_category)} sent · TTL ${_lastSent?.ttl} · msg #${_lastSent?.msgId}';
         break;
     }
     return Text(
       text,
       textAlign: TextAlign.center,
-      style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+      style: Theme.of(
+        context,
+      ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+    );
+  }
+}
+
+class _SentCheckLine extends StatelessWidget {
+  final String text;
+  const _SentCheckLine(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.check, size: 14, color: AppColors.relayed),
+          const SizedBox(width: 6),
+          Text(text, style: Theme.of(context).textTheme.bodySmall),
+        ],
+      ),
     );
   }
 }

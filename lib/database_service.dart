@@ -16,7 +16,7 @@ import 'models.dart';
 
 class AppDatabase {
   static Database? _db;
-  static const int _version = 9;
+  static const int _version = 10;
 
   /// The database filename. A constant in the app; overridable only so that
   /// test files can each own their own file.
@@ -57,7 +57,11 @@ class AppDatabase {
           // models.dart) — a pre-existing row is someone who signed in
           // before roles existed, i.e. a volunteer.
           await _addColumnIfMissing(
-              db, 'volunteer_profile', 'role', "TEXT NOT NULL DEFAULT 'volunteer'");
+            db,
+            'volunteer_profile',
+            'role',
+            "TEXT NOT NULL DEFAULT 'volunteer'",
+          );
         }
         if (oldVersion < 5) {
           // Persistent Mesh ID (see generateMeshId() in models.dart). Left
@@ -79,10 +83,26 @@ class AppDatabase {
           // in the presence beacon. Defaults to none: a phone must never
           // claim to be a medical point because of a migration.
           await _addColumnIfMissing(
-              db, 'volunteer_profile', 'station', 'INTEGER NOT NULL DEFAULT 0');
+            db,
+            'volunteer_profile',
+            'station',
+            'INTEGER NOT NULL DEFAULT 0',
+          );
         }
         if (oldVersion < 9) {
           await _createHelpPoints(db);
+        }
+        if (oldVersion < 10) {
+          // Self-declared Dindi Lead flag (see UserProfile.isDindiLead) —
+          // the Wari Emergency Response Network. Defaults to 0 for the same
+          // reason station defaults to kStationNone: a phone must never
+          // claim to lead a Dindi because of a migration.
+          await _addColumnIfMissing(
+            db,
+            'volunteer_profile',
+            'is_dindi_lead',
+            'INTEGER NOT NULL DEFAULT 0',
+          );
         }
       },
     );
@@ -199,11 +219,12 @@ class AppDatabase {
         volunteer_id TEXT NOT NULL,
         mesh_id TEXT,
         logged_in_at INTEGER NOT NULL,
-        -- Kept in step with the v8 ALTER in onUpgrade. Every column added by
-        -- a migration has to be added here too, or a fresh install and an
-        -- upgraded install end up with different tables — and the fresh one
-        -- breaks, which is the case that gets tested least.
-        station INTEGER NOT NULL DEFAULT 0
+        -- Kept in step with the v8/v10 ALTERs in onUpgrade. Every column
+        -- added by a migration has to be added here too, or a fresh install
+        -- and an upgraded install end up with different tables — and the
+        -- fresh one breaks, which is the case that gets tested least.
+        station INTEGER NOT NULL DEFAULT 0,
+        is_dindi_lead INTEGER NOT NULL DEFAULT 0
       )
     ''');
   }
@@ -279,11 +300,11 @@ class SeenMessagesDb {
   }
 
   static Future<void> markSeen(MeshPacket packet) => markSeenRaw(
-        packet.msgId,
-        category: packet.category,
-        senderLabel: packet.senderLabel,
-        ttl: packet.ttl,
-      );
+    packet.msgId,
+    category: packet.category,
+    senderLabel: packet.senderLabel,
+    ttl: packet.ttl,
+  );
 
   /// The generic form [markSeen] delegates to. [hasSeen] above was already
   /// keyed on msgId alone, so it works unmodified for any packet kind — only
@@ -299,18 +320,14 @@ class SeenMessagesDb {
     required int ttl,
   }) async {
     final db = await AppDatabase.instance;
-    await db.insert(
-      'seen_messages',
-      {
-        'msg_id': msgId,
-        'category': category,
-        'sender_label': senderLabel,
-        'ttl_at_capture': ttl,
-        'captured_at': DateTime.now().millisecondsSinceEpoch,
-        'synced': 0,
-      },
-      conflictAlgorithm: ConflictAlgorithm.ignore,
-    );
+    await db.insert('seen_messages', {
+      'msg_id': msgId,
+      'category': category,
+      'sender_label': senderLabel,
+      'ttl_at_capture': ttl,
+      'captured_at': DateTime.now().millisecondsSinceEpoch,
+      'synced': 0,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 
   static Future<int> count() async {
@@ -376,7 +393,11 @@ class AlertsDb {
   }
 
   static Future<void> setResolved(
-      int msgId, String meshId, int reason, DateTime at) async {
+    int msgId,
+    String meshId,
+    int reason,
+    DateTime at,
+  ) async {
     final db = await AppDatabase.instance;
     await db.update(
       'alerts',
@@ -408,7 +429,11 @@ class AlertsDb {
   /// against [AlertRecord.triageRank], since that depends on live state.
   static Future<List<AlertRecord>> all() async {
     final db = await AppDatabase.instance;
-    final rows = await db.query('alerts', orderBy: 'received_at DESC', limit: 200);
+    final rows = await db.query(
+      'alerts',
+      orderBy: 'received_at DESC',
+      limit: 200,
+    );
     return rows.map(AlertRecord.fromMap).toList();
   }
 }
@@ -433,7 +458,12 @@ class HelpPointsDb {
     );
   }
 
-  static Future<void> setStatus(int msgId, int status, {String? closedBy, DateTime? closedAt}) async {
+  static Future<void> setStatus(
+    int msgId,
+    int status, {
+    String? closedBy,
+    DateTime? closedAt,
+  }) async {
     final db = await AppDatabase.instance;
     await db.update(
       'help_points',
@@ -467,8 +497,14 @@ class HelpPointsDb {
   /// expiry still sees what was there.
   static Future<void> reapExpired() async {
     final db = await AppDatabase.instance;
-    final cutoff = DateTime.now().subtract(const Duration(days: 1)).millisecondsSinceEpoch;
-    await db.delete('help_points', where: 'expires_at < ?', whereArgs: [cutoff]);
+    final cutoff = DateTime.now()
+        .subtract(const Duration(days: 1))
+        .millisecondsSinceEpoch;
+    await db.delete(
+      'help_points',
+      where: 'expires_at < ?',
+      whereArgs: [cutoff],
+    );
   }
 
   /// The whole table, newest first. Filtering into "active now" happens in
@@ -476,7 +512,11 @@ class HelpPointsDb {
   /// live computation, not something worth re-querying for.
   static Future<List<HelpPointRecord>> all() async {
     final db = await AppDatabase.instance;
-    final rows = await db.query('help_points', orderBy: 'received_at DESC', limit: 200);
+    final rows = await db.query(
+      'help_points',
+      orderBy: 'received_at DESC',
+      limit: 200,
+    );
     return rows.map(HelpPointRecord.fromMap).toList();
   }
 }
@@ -526,7 +566,10 @@ class LostReportsDb {
 
   static Future<List<LostReport>> all() async {
     final db = await AppDatabase.instance;
-    final rows = await db.query('lost_reports', orderBy: 'found ASC, created_at DESC');
+    final rows = await db.query(
+      'lost_reports',
+      orderBy: 'found ASC, created_at DESC',
+    );
     return rows.map(LostReport.fromMap).toList();
   }
 }
@@ -540,11 +583,10 @@ class LostReportsDb {
 class UserDb {
   static Future<void> save(UserProfile profile) async {
     final db = await AppDatabase.instance;
-    await db.insert(
-      'volunteer_profile',
-      {'id': 1, ...profile.toMap()},
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('volunteer_profile', {
+      'id': 1,
+      ...profile.toMap(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   static Future<UserProfile?> current() async {
@@ -576,15 +618,11 @@ class UserDb {
 class KnownDindisDb {
   static Future<void> remember(String name) async {
     final db = await AppDatabase.instance;
-    await db.insert(
-      'known_dindis',
-      {
-        'name': name,
-        'tag': dindiTagFor(name),
-        'created_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('known_dindis', {
+      'name': name,
+      'tag': dindiTagFor(name),
+      'created_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   static Future<List<String>> all() async {
@@ -593,7 +631,6 @@ class KnownDindisDb {
     return rows.map((r) => r['name'] as String).toList();
   }
 }
-
 
 // ===================== messages =====================
 //

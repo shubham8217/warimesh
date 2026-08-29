@@ -12,7 +12,11 @@ void main() {
   group('LocationPacket', () {
     test('round-trips a position to roughly centimetre precision', () {
       // Pandharpur, the destination of the Wari.
-      final packet = LocationPacket(msgId: 3141592653, latitude: 17.679076, longitude: 75.323997);
+      final packet = LocationPacket(
+        msgId: 3141592653,
+        latitude: 17.679076,
+        longitude: 75.323997,
+      );
       final decoded = LocationPacket.decode(packet.encode())!;
 
       expect(decoded.msgId, packet.msgId);
@@ -21,7 +25,11 @@ void main() {
     });
 
     test('round-trips negative coordinates', () {
-      final packet = LocationPacket(msgId: 1, latitude: -33.8688, longitude: -70.6693);
+      final packet = LocationPacket(
+        msgId: 1,
+        latitude: -33.8688,
+        longitude: -70.6693,
+      );
       final decoded = LocationPacket.decode(packet.encode())!;
       expect(decoded.latitude, closeTo(-33.8688, 0.0000001));
       expect(decoded.longitude, closeTo(-70.6693, 0.0000001));
@@ -30,7 +38,11 @@ void main() {
     test('survives a msgId in the top half of the uint32 range', () {
       // msgIds are random uint32s, so anything above 2^31 must not come
       // back as a negative number through the int/uint boundary.
-      final packet = LocationPacket(msgId: 0xFFFFFFFE, latitude: 18.5, longitude: 73.85);
+      final packet = LocationPacket(
+        msgId: 0xFFFFFFFE,
+        latitude: 18.5,
+        longitude: 73.85,
+      );
       expect(LocationPacket.decode(packet.encode())!.msgId, 0xFFFFFFFE);
     });
 
@@ -38,37 +50,58 @@ void main() {
       // A legacy advertisement leaves ~24 usable bytes of manufacturer
       // data. Every packet format has to stay under that or it silently
       // never transmits.
-      expect(LocationPacket(msgId: 1, latitude: 1, longitude: 1).encode().length, lessThanOrEqualTo(24));
+      expect(
+        LocationPacket(msgId: 1, latitude: 1, longitude: 1).encode().length,
+        lessThanOrEqualTo(24),
+      );
     });
 
     test('rejects a packet of the wrong type', () {
-      final alert = MeshPacket(ttl: 2, msgId: 7, category: kCategorySos, senderLabel: 'W7K2M9');
+      final alert = MeshPacket(
+        ttl: 2,
+        msgId: 7,
+        category: kCategorySos,
+        senderLabel: 'W7K2M9',
+      );
       expect(LocationPacket.decode(alert.encode()), isNull);
     });
 
     test('rejects coordinates that are not on Earth', () {
-      final bytes = LocationPacket(msgId: 1, latitude: 0, longitude: 0).encode();
+      final bytes = LocationPacket(
+        msgId: 1,
+        latitude: 0,
+        longitude: 0,
+      ).encode();
       bytes[5] = 0x7F; // corrupt the latitude into an out-of-range value
       bytes[6] = 0xFF;
       expect(LocationPacket.decode(bytes), isNull);
     });
 
     test('rejects a truncated packet', () {
-      final short = LocationPacket(msgId: 1, latitude: 1, longitude: 1).encode().sublist(0, 8);
+      final short = LocationPacket(
+        msgId: 1,
+        latitude: 1,
+        longitude: 1,
+      ).encode().sublist(0, 8);
       expect(LocationPacket.decode(short), isNull);
     });
   });
 
   group('IncomingAlert location labels', () {
     IncomingAlert alertAt({double? distance, double? bearing}) => IncomingAlert(
-          packet: MeshPacket(ttl: 2, msgId: 1, category: kCategorySos, senderLabel: 'W7K2M9'),
-          senderName: 'Priya',
-          receivedAt: DateTime.now(),
-          senderLatitude: 18.5,
-          senderLongitude: 73.85,
-          distanceMetres: distance,
-          bearingDegrees: bearing,
-        );
+      packet: MeshPacket(
+        ttl: 2,
+        msgId: 1,
+        category: kCategorySos,
+        senderLabel: 'W7K2M9',
+      ),
+      senderName: 'Priya',
+      receivedAt: DateTime.now(),
+      senderLatitude: 18.5,
+      senderLongitude: 73.85,
+      distanceMetres: distance,
+      bearingDegrees: bearing,
+    );
 
     test('shows metres below a kilometre and kilometres above', () {
       expect(alertAt(distance: 240).distanceLabel, '240 m away');
@@ -97,7 +130,13 @@ void main() {
 
   group('other packet formats still round-trip', () {
     test('MeshPacket', () {
-      final p = MeshPacket(ttl: 2, msgId: 424242, category: kCategoryLostPerson, senderLabel: 'W7K2M9', groupTag: 'K7');
+      final p = MeshPacket(
+        ttl: 2,
+        msgId: 424242,
+        category: kCategoryLostPerson,
+        senderLabel: 'W7K2M9',
+        groupTag: 'K7',
+      );
       final d = MeshPacket.decode(p.encode())!;
       expect(d.ttl, 2);
       expect(d.msgId, 424242);
@@ -107,20 +146,31 @@ void main() {
     });
 
     test('PresencePacket truncates a long name instead of overflowing', () {
-      final p = PresencePacket(meshId: 'W7K2M9', groupTag: 'K7', name: 'Bhagyashree');
-      expect(p.encode().length, kPresencePacketLength);
+      final p = PresencePacket(
+        meshId: 'W7K2M9',
+        groupTag: 'K7',
+        name: 'Bhagyashree',
+      );
+      expect(p.encode().length, kPresenceFullLength);
       expect(PresencePacket.decode(p.encode())!.name, 'Bhagyashre');
     });
 
     test('a non-ASCII name degrades rather than throwing', () {
       // Names on the Wari are very plausibly Devanagari; ascii.encode()
       // would throw on them and take a whole broadcast down with it.
-      final p = PresencePacket(meshId: 'W7K2M9', groupTag: 'K7', name: 'प्रिया');
+      final p = PresencePacket(
+        meshId: 'W7K2M9',
+        groupTag: 'K7',
+        name: 'प्रिया',
+      );
       expect(() => p.encode(), returnsNormally);
     });
 
     test('dindiTagFor is stable across case and whitespace', () {
-      expect(dindiTagFor('Sant Tukaram Dindi'), dindiTagFor('  sant tukaram dindi '));
+      expect(
+        dindiTagFor('Sant Tukaram Dindi'),
+        dindiTagFor('  sant tukaram dindi '),
+      );
       expect(dindiTagFor(''), '--');
       expect(dindiTagFor('—'), '--');
     });
@@ -139,8 +189,16 @@ void main() {
     });
 
     test('a RESOLVE carries its reason and fits one advertisement', () {
-      for (final reason in [kResolveFound, kResolveHandled, kResolveFalseAlarm]) {
-        final res = ResolvePacket(msgId: 42, resolverMeshId: 'V4B2XY', reason: reason);
+      for (final reason in [
+        kResolveFound,
+        kResolveHandled,
+        kResolveFalseAlarm,
+      ]) {
+        final res = ResolvePacket(
+          msgId: 42,
+          resolverMeshId: 'V4B2XY',
+          reason: reason,
+        );
         final bytes = res.encode();
         expect(bytes.length, kResolvePacketLength);
         expect(bytes.length, lessThanOrEqualTo(24));
@@ -152,14 +210,20 @@ void main() {
       }
     });
 
-    test('an unknown reason code degrades to "handled" rather than decoding as found', () {
-      // Direction matters here. A newer build inventing reason code 9 must
-      // never be read as "found safe" by an older phone — that would close a
-      // search on a guess.
-      final bytes = ResolvePacket(msgId: 1, resolverMeshId: 'VZZZZZ').encode();
-      bytes[11] = 9;
-      expect(ResolvePacket.decode(bytes)!.reason, kResolveHandled);
-    });
+    test(
+      'an unknown reason code degrades to "handled" rather than decoding as found',
+      () {
+        // Direction matters here. A newer build inventing reason code 9 must
+        // never be read as "found safe" by an older phone — that would close a
+        // search on a guess.
+        final bytes = ResolvePacket(
+          msgId: 1,
+          resolverMeshId: 'VZZZZZ',
+        ).encode();
+        bytes[11] = 9;
+        expect(ResolvePacket.decode(bytes)!.reason, kResolveHandled);
+      },
+    );
 
     test('the response decoders reject each other and anything truncated', () {
       final ack = AckPacket(msgId: 7, responderMeshId: 'V11111').encode();
@@ -167,13 +231,19 @@ void main() {
       expect(ResolvePacket.decode(ack), isNull);
       expect(AckPacket.decode(res), isNull);
       expect(AckPacket.decode(ack.sublist(0, kAckPacketLength - 1)), isNull);
-      expect(ResolvePacket.decode(res.sublist(0, kResolvePacketLength - 1)), isNull);
+      expect(
+        ResolvePacket.decode(res.sublist(0, kResolvePacketLength - 1)),
+        isNull,
+      );
     });
 
-    test('a blank responder id is rejected rather than attributed to nobody', () {
-      final ack = AckPacket(msgId: 7, responderMeshId: '      ').encode();
-      expect(AckPacket.decode(ack), isNull);
-    });
+    test(
+      'a blank responder id is rejected rather than attributed to nobody',
+      () {
+        final ack = AckPacket(msgId: 7, responderMeshId: '      ').encode();
+        expect(AckPacket.decode(ack), isNull);
+      },
+    );
   });
 
   group('PresencePacket station byte', () {
@@ -192,56 +262,207 @@ void main() {
       }
     });
 
-    test('still fits one advertisement at 20 bytes', () {
-      final bytes = PresencePacket(
-        meshId: 'V7K2M9',
-        groupTag: 'AB',
-        name: 'Sunita',
-        station: kStationMedical,
-      ).encode();
-      expect(bytes.length, kPresencePacketLength);
-      expect(bytes.length, lessThanOrEqualTo(24));
+    test(
+      'still fits one advertisement at 21 bytes, station + Lead flag included',
+      () {
+        final bytes = PresencePacket(
+          meshId: 'V7K2M9',
+          groupTag: 'AB',
+          name: 'Sunita',
+          station: kStationMedical,
+        ).encode();
+        expect(bytes.length, kPresenceFullLength);
+        expect(bytes.length, lessThanOrEqualTo(24));
+      },
+    );
+
+    test(
+      'a 19-byte beacon from an older build still decodes, as no help point',
+      () {
+        // The backward-compatibility guarantee that lets the station byte ship
+        // without a flag day — see the note on kPresencePacketLength. A phone
+        // that cannot be updated must not fall off the mesh.
+        final full = PresencePacket(
+          meshId: 'W7K2M9',
+          groupTag: 'AB',
+          name: 'Aarav',
+          station: kStationWater,
+        ).encode();
+        final legacy = full.sublist(0, kPresenceBaseLength);
+
+        final decoded = PresencePacket.decode(legacy)!;
+        expect(decoded.meshId, 'W7K2M9');
+        expect(decoded.name, 'Aarav');
+        expect(decoded.station, kStationNone);
+        expect(decoded.isHelpPoint, isFalse);
+        expect(decoded.isDindiLead, isFalse);
+      },
+    );
+
+    test(
+      'an unknown station code from a newer build reads as no help point',
+      () {
+        // Same direction of caution as the resolve reason: never render an
+        // undefined code as some kind of help, which would send someone
+        // walking towards a tent that isn't there.
+        final bytes = PresencePacket(
+          meshId: 'V7K2M9',
+          groupTag: 'AB',
+          name: 'X',
+        ).encode();
+        bytes[kPresenceBaseLength] = 99;
+        expect(PresencePacket.decode(bytes)!.station, kStationNone);
+      },
+    );
+  });
+
+  group('PresencePacket Dindi Lead flag', () {
+    test('round-trips true and false', () {
+      for (final lead in [true, false]) {
+        final packet = PresencePacket(
+          meshId: 'W7K2M9',
+          groupTag: 'AB',
+          name: 'Rahul',
+          isDindiLead: lead,
+        );
+        expect(PresencePacket.decode(packet.encode())!.isDindiLead, lead);
+      }
     });
 
-    test('a 19-byte beacon from an older build still decodes, as no help point', () {
-      // The backward-compatibility guarantee that lets the station byte ship
-      // without a flag day — see the note on kPresencePacketLength. A phone
-      // that cannot be updated must not fall off the mesh.
-      final full = PresencePacket(
+    test(
+      'a 20-byte beacon (station, no Lead flag) from an older build decodes as not-Lead',
+      () {
+        // Same append-only guarantee the station byte relies on, one layer
+        // further — see the note on kPresenceFullLength. A phone that shipped
+        // with station support but not yet the Lead flag must not fall off
+        // the mesh, and must not be mistaken for a Lead by a newer phone.
+        final full = PresencePacket(
+          meshId: 'W7K2M9',
+          groupTag: 'AB',
+          name: 'Rahul',
+          station: kStationMedical,
+          isDindiLead: true,
+        ).encode();
+        final legacy = full.sublist(0, kPresencePacketLength);
+
+        final decoded = PresencePacket.decode(legacy)!;
+        expect(decoded.station, kStationMedical);
+        expect(decoded.isDindiLead, isFalse);
+      },
+    );
+
+    test('station and Lead flag are independent', () {
+      final packet = PresencePacket(
         meshId: 'W7K2M9',
         groupTag: 'AB',
-        name: 'Aarav',
-        station: kStationWater,
-      ).encode();
-      final legacy = full.sublist(0, kPresenceBaseLength);
-
-      final decoded = PresencePacket.decode(legacy)!;
-      expect(decoded.meshId, 'W7K2M9');
-      expect(decoded.name, 'Aarav');
+        name: 'Rahul',
+        station: kStationNone,
+        isDindiLead: true,
+      );
+      final decoded = PresencePacket.decode(packet.encode())!;
       expect(decoded.station, kStationNone);
-      expect(decoded.isHelpPoint, isFalse);
-    });
-
-    test('an unknown station code from a newer build reads as no help point', () {
-      // Same direction of caution as the resolve reason: never render an
-      // undefined code as some kind of help, which would send someone
-      // walking towards a tent that isn't there.
-      final bytes = PresencePacket(meshId: 'V7K2M9', groupTag: 'AB', name: 'X').encode();
-      bytes[kPresenceBaseLength] = 99;
-      expect(PresencePacket.decode(bytes)!.station, kStationNone);
+      expect(decoded.isDindiLead, isTrue);
     });
   });
 
-  group('AlertRecord triage', () {
-    AlertRecord make(int category, {String? claimedBy, DateTime? resolvedAt, int minutesAgo = 0}) =>
-        AlertRecord(
-          msgId: category * 1000 + minutesAgo,
-          category: category,
-          senderLabel: 'W7K2M9',
-          receivedAt: DateTime.now().subtract(Duration(minutes: minutesAgo)),
-          claimedBy: claimedBy,
-          resolvedAt: resolvedAt,
+  group(
+    'responderRoleLabel and responderVerb — Wari Emergency Response Network',
+    () {
+      test('a V-prefixed Mesh ID is always a Volunteer, Lead flag or not', () {
+        expect(responderRoleLabel('V7K2M9', isDindiLead: false), 'Volunteer');
+        expect(responderRoleLabel('V7K2M9', isDindiLead: true), 'Volunteer');
+      });
+
+      test('a W-prefixed Mesh ID flagged as Lead is the Dindi Lead', () {
+        expect(responderRoleLabel('W7K2M9', isDindiLead: true), 'Dindi Lead');
+      });
+
+      test('a W-prefixed Mesh ID with no Lead flag is an ordinary Warkari', () {
+        // The "Join anyway" case — ACK doesn't discriminate who's allowed to
+        // claim, so an ordinary Dindi member can still show up here.
+        expect(responderRoleLabel('W7K2M9', isDindiLead: false), 'Warkari');
+      });
+
+      test('a Lead coordinates, everyone else responds', () {
+        expect(responderVerb('Dindi Lead'), 'is coordinating');
+        expect(responderVerb('Volunteer'), 'is responding');
+        expect(responderVerb('Warkari'), 'is responding');
+      });
+    },
+  );
+
+  group('isDindiEmergency — the Dindi Lead\'s queue filter', () {
+    AlertRecord makeAlert({
+      int category = kCategorySos,
+      String groupTag = 'AB',
+      bool mine = false,
+    }) => AlertRecord(
+      msgId: 1,
+      category: category,
+      senderLabel: 'W7K2M9',
+      groupTag: groupTag,
+      receivedAt: DateTime.now(),
+      mine: mine,
+    );
+
+    test('an SOS from the Lead\'s own Dindi qualifies', () {
+      expect(isDindiEmergency(makeAlert(groupTag: 'AB'), 'AB'), isTrue);
+    });
+
+    test('an SOS from a different Dindi does not', () {
+      expect(isDindiEmergency(makeAlert(groupTag: 'ZZ'), 'AB'), isFalse);
+    });
+
+    test(
+      'a Lost Person report never appears here, even from the same Dindi',
+      () {
+        // Dindi Emergencies is specifically the SOS routing layer — Lost
+        // Person already has its own screen (missing_screen.dart).
+        expect(
+          isDindiEmergency(
+            makeAlert(category: kCategoryLostPerson, groupTag: 'AB'),
+            'AB',
+          ),
+          isFalse,
         );
+      },
+    );
+
+    test('this phone\'s own SOS never appears as something to coordinate', () {
+      expect(
+        isDindiEmergency(makeAlert(groupTag: 'AB', mine: true), 'AB'),
+        isFalse,
+      );
+    });
+
+    test(
+      'a warkari with no Dindi (tag "--") never matches a Lead\'s empty tag either',
+      () {
+        // Edge case 12: "Warkari without Dindi → SOS still reaches volunteers
+        // normally." Confirms it does NOT also masquerade as a Dindi
+        // Emergency for a Lead who also has no Dindi set.
+        expect(isDindiEmergency(makeAlert(groupTag: '--'), '--'), isTrue);
+        // But a Lead's own un-set groupTag deliberately still doesn't create
+        // a false match with a genuinely tagged Dindi.
+        expect(isDindiEmergency(makeAlert(groupTag: 'AB'), '--'), isFalse);
+      },
+    );
+  });
+
+  group('AlertRecord triage', () {
+    AlertRecord make(
+      int category, {
+      String? claimedBy,
+      DateTime? resolvedAt,
+      int minutesAgo = 0,
+    }) => AlertRecord(
+      msgId: category * 1000 + minutesAgo,
+      category: category,
+      senderLabel: 'W7K2M9',
+      receivedAt: DateTime.now().subtract(Duration(minutes: minutesAgo)),
+      claimedBy: claimedBy,
+      resolvedAt: resolvedAt,
+    );
 
     test('an unclaimed SOS outranks everything else', () {
       final sos = make(kCategorySos);
@@ -261,7 +482,11 @@ void main() {
 
       // A resolved alert is not "claimed" even when someone had claimed it —
       // otherwise the queue would offer to respond to a closed incident.
-      final closed = make(kCategorySos, claimedBy: 'V1', resolvedAt: DateTime.now());
+      final closed = make(
+        kCategorySos,
+        claimedBy: 'V1',
+        resolvedAt: DateTime.now(),
+      );
       expect(closed.isResolved, isTrue);
       expect(closed.isClaimed, isFalse);
       expect(closed.isOpen, isFalse);
@@ -282,13 +507,16 @@ void main() {
     });
 
     test('survives a round-trip through the database map', () {
-      final original = make(kCategoryLostPerson, claimedBy: 'V4B2XY', minutesAgo: 3)
-        ..lostName = 'Aarav'
-        ..lostAge = '8'
-        ..latitude = 17.679076
-        ..longitude = 75.323997;
+      final original =
+          make(kCategoryLostPerson, claimedBy: 'V4B2XY', minutesAgo: 3)
+            ..lostName = 'Aarav'
+            ..lostAge = '8'
+            ..latitude = 17.679076
+            ..longitude = 75.323997;
 
-      final restored = AlertRecord.fromMap(original.toMap().cast<String, Object?>());
+      final restored = AlertRecord.fromMap(
+        original.toMap().cast<String, Object?>(),
+      );
       expect(restored.msgId, original.msgId);
       expect(restored.category, kCategoryLostPerson);
       expect(restored.claimedBy, 'V4B2XY');
@@ -299,7 +527,8 @@ void main() {
   });
 
   group('text fragmentation', () {
-    ({TextHeadPacket head, List<TextPartPacket> parts}) frag(String body) => fragmentText(
+    ({TextHeadPacket head, List<TextPartPacket> parts}) frag(String body) =>
+        fragmentText(
           msgId: 7654321,
           ttl: kDefaultTtl,
           kind: kTextKindChat,
@@ -318,7 +547,9 @@ void main() {
         final part = TextPartPacket.decode(p.encode())!;
         chunks[part.index] = part.chunk;
       }
-      return [for (var i = 0; i < head.fragTotal; i++) chunks[i]!].join().trimRight();
+      return [
+        for (var i = 0; i < head.fragTotal; i++) chunks[i]!,
+      ].join().trimRight();
     }
 
     test('a message shorter than one fragment needs exactly one', () {
@@ -366,7 +597,9 @@ void main() {
     });
 
     test('identity and kind survive the head round-trip', () {
-      final head = TextHeadPacket.decode(frag('hello there friend').head.encode())!;
+      final head = TextHeadPacket.decode(
+        frag('hello there friend').head.encode(),
+      )!;
       expect(head.msgId, 7654321);
       expect(head.senderLabel, 'W7K2M9');
       expect(head.groupTag, '53');
@@ -375,10 +608,16 @@ void main() {
     });
 
     test('an announcement is distinguishable from chat on the wire', () {
-      final head = TextHeadPacket.decode(fragmentText(
-        msgId: 1, ttl: 2, kind: kTextKindAnnouncement,
-        groupTag: '53', senderLabel: 'V7K2M9', body: 'Route changed',
-      ).head.encode())!;
+      final head = TextHeadPacket.decode(
+        fragmentText(
+          msgId: 1,
+          ttl: 2,
+          kind: kTextKindAnnouncement,
+          groupTag: '53',
+          senderLabel: 'V7K2M9',
+          body: 'Route changed',
+        ).head.encode(),
+      )!;
       expect(head.kind, kTextKindAnnouncement);
     });
 
@@ -446,14 +685,25 @@ void main() {
 
     test('carries the LIMITED status', () {
       final packet = HelpPointPacket(
-        ttl: 2, msgId: 1, helpType: kStationNightHalt, senderLabel: 'V1AAAA', status: kHelpStatusLimited,
+        ttl: 2,
+        msgId: 1,
+        helpType: kStationNightHalt,
+        senderLabel: 'V1AAAA',
+        status: kHelpStatusLimited,
       );
-      expect(HelpPointPacket.decode(packet.encode())!.status, kHelpStatusLimited);
+      expect(
+        HelpPointPacket.decode(packet.encode())!.status,
+        kHelpStatusLimited,
+      );
     });
 
     test('relaying decrements ttl and preserves identity, type and expiry', () {
       final original = HelpPointPacket(
-        ttl: kDefaultTtl, msgId: 55, helpType: kStationWater, senderLabel: 'V4B2XY', expiresInMinutesDiv5: 10,
+        ttl: kDefaultTtl,
+        msgId: 55,
+        helpType: kStationWater,
+        senderLabel: 'V4B2XY',
+        expiresInMinutesDiv5: 10,
       );
       final relayed = original.relayed();
       expect(relayed.ttl, kDefaultTtl - 1);
@@ -463,24 +713,48 @@ void main() {
       expect(relayed.expiresInMinutesDiv5, 10);
     });
 
-    test('rejects kStationNone — an announcement must name a real help type', () {
-      final bytes = HelpPointPacket(ttl: 2, msgId: 1, helpType: kStationMedical, senderLabel: 'V1AAAA').encode();
-      bytes[6] = kStationNone;
-      expect(HelpPointPacket.decode(bytes), isNull);
-    });
+    test(
+      'rejects kStationNone — an announcement must name a real help type',
+      () {
+        final bytes = HelpPointPacket(
+          ttl: 2,
+          msgId: 1,
+          helpType: kStationMedical,
+          senderLabel: 'V1AAAA',
+        ).encode();
+        bytes[6] = kStationNone;
+        expect(HelpPointPacket.decode(bytes), isNull);
+      },
+    );
 
-    test('an unknown help type from a newer build is rejected rather than shown as something undefined', () {
-      final bytes = HelpPointPacket(ttl: 2, msgId: 1, helpType: kStationMedical, senderLabel: 'V1AAAA').encode();
-      bytes[6] = 200;
-      expect(HelpPointPacket.decode(bytes), isNull);
-    });
+    test(
+      'an unknown help type from a newer build is rejected rather than shown as something undefined',
+      () {
+        final bytes = HelpPointPacket(
+          ttl: 2,
+          msgId: 1,
+          helpType: kStationMedical,
+          senderLabel: 'V1AAAA',
+        ).encode();
+        bytes[6] = 200;
+        expect(HelpPointPacket.decode(bytes), isNull);
+      },
+    );
 
     test('rejects a packet of the wrong type and anything truncated', () {
-      final alert = MeshPacket(ttl: 2, msgId: 7, category: kCategorySos, senderLabel: 'W7K2M9').encode();
+      final alert = MeshPacket(
+        ttl: 2,
+        msgId: 7,
+        category: kCategorySos,
+        senderLabel: 'W7K2M9',
+      ).encode();
       expect(HelpPointPacket.decode(alert), isNull);
-      final short = HelpPointPacket(ttl: 2, msgId: 1, helpType: kStationMedical, senderLabel: 'V1AAAA')
-          .encode()
-          .sublist(0, kHelpPointPacketLength - 1);
+      final short = HelpPointPacket(
+        ttl: 2,
+        msgId: 1,
+        helpType: kStationMedical,
+        senderLabel: 'V1AAAA',
+      ).encode().sublist(0, kHelpPointPacketLength - 1);
       expect(HelpPointPacket.decode(short), isNull);
     });
   });
@@ -488,7 +762,11 @@ void main() {
   group('HelpPointStatusPacket — closing or updating a help point', () {
     test('round-trips CLOSED and LIMITED and fits one advertisement', () {
       for (final status in [kHelpStatusClosed, kHelpStatusLimited]) {
-        final packet = HelpPointStatusPacket(msgId: 42, updaterMeshId: 'V4B2XY', status: status);
+        final packet = HelpPointStatusPacket(
+          msgId: 42,
+          updaterMeshId: 'V4B2XY',
+          status: status,
+        );
         final bytes = packet.encode();
         expect(bytes.length, kHelpPointStatusPacketLength);
         expect(bytes.length, lessThanOrEqualTo(24));
@@ -504,22 +782,29 @@ void main() {
       // Same direction of caution as ResolvePacket's unknown-reason test:
       // never let a corrupt or newer-build byte read as "still open", which
       // would send someone walking towards a help point that said it's shut.
-      final bytes = HelpPointStatusPacket(msgId: 1, updaterMeshId: 'VZZZZZ').encode();
+      final bytes = HelpPointStatusPacket(
+        msgId: 1,
+        updaterMeshId: 'VZZZZZ',
+      ).encode();
       bytes[11] = 9;
       expect(HelpPointStatusPacket.decode(bytes)!.status, kHelpStatusClosed);
     });
 
     test('a blank updater id is rejected rather than attributed to nobody', () {
-      final bytes = HelpPointStatusPacket(msgId: 7, updaterMeshId: '      ').encode();
+      final bytes = HelpPointStatusPacket(
+        msgId: 7,
+        updaterMeshId: '      ',
+      ).encode();
       expect(HelpPointStatusPacket.decode(bytes), isNull);
     });
 
     test('rejects a packet of the wrong type and anything truncated', () {
       final ack = AckPacket(msgId: 7, responderMeshId: 'V11111').encode();
       expect(HelpPointStatusPacket.decode(ack), isNull);
-      final short = HelpPointStatusPacket(msgId: 1, updaterMeshId: 'V1AAAA')
-          .encode()
-          .sublist(0, kHelpPointStatusPacketLength - 1);
+      final short = HelpPointStatusPacket(
+        msgId: 1,
+        updaterMeshId: 'V1AAAA',
+      ).encode().sublist(0, kHelpPointStatusPacketLength - 1);
       expect(HelpPointStatusPacket.decode(short), isNull);
     });
   });
@@ -550,7 +835,10 @@ void main() {
     });
 
     test('a night halt gets a longer default expiry than other stations', () {
-      expect(helpPointDefaultExpiry(kStationNightHalt), greaterThan(helpPointDefaultExpiry(kStationMedical)));
+      expect(
+        helpPointDefaultExpiry(kStationNightHalt),
+        greaterThan(helpPointDefaultExpiry(kStationMedical)),
+      );
     });
 
     test('survives a round-trip through the database map', () {
@@ -565,7 +853,9 @@ void main() {
         status: kHelpStatusLimited,
       )..acknowledged = true;
 
-      final restored = HelpPointRecord.fromMap(original.toMap().cast<String, Object?>());
+      final restored = HelpPointRecord.fromMap(
+        original.toMap().cast<String, Object?>(),
+      );
       expect(restored.msgId, 12345);
       expect(restored.helpType, kStationPolice);
       expect(restored.hops, 2);

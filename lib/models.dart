@@ -28,7 +28,8 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
-const int kManufacturerId = 0xFFFF; // BT SIG "reserved for testing" ID — fine for a prototype, not for shipped hardware.
+const int kManufacturerId =
+    0xFFFF; // BT SIG "reserved for testing" ID — fine for a prototype, not for shipped hardware.
 const int kPacketType = 1;
 const int kDefaultTtl = 2;
 const int kPacketLength = 15;
@@ -43,7 +44,8 @@ const int kCategoryLostPerson = 1;
 // separate path and never enter that code.
 const int kPresencePacketType = 2;
 const int kPresenceNameLength = 10; // fits a first name; longer ones truncate
-const int kPresenceBaseLength = 1 + 6 + 2 + kPresenceNameLength; // type + meshId + groupTag + name
+const int kPresenceBaseLength =
+    1 + 6 + 2 + kPresenceNameLength; // type + meshId + groupTag + name
 // A trailing station byte (see kStationNone and friends) was appended after
 // the name, taking the beacon from 19 to 20 bytes. It is deliberately LAST
 // and read by length, not position: a phone still running the 19-byte
@@ -52,6 +54,13 @@ const int kPresenceBaseLength = 1 + 6 + 2 + kPresenceNameLength; // type + meshI
 // no version negotiation — just append-only growth, which is the only kind
 // of protocol change you can safely make to devices you cannot update.
 const int kPresencePacketLength = kPresenceBaseLength + 1;
+// A second trailing byte — "is this phone the Dindi Lead for its groupTag"
+// — added the same way the station byte was: appended after everything
+// that came before it, read by length rather than position. See the note
+// on kPresencePacketLength immediately above for why this is the only kind
+// of protocol change that's safe here. A phone still running the 19- or
+// 20-byte format decodes as "not a Lead" rather than failing.
+const int kPresenceFullLength = kPresencePacketLength + 1;
 
 // A missing-person DETAIL packet (packetType 3, see LostPersonDetailPacket)
 // — sent alongside the Lost Person ALERT, carrying the one thing that
@@ -90,8 +99,10 @@ const int kTextHeadPacketType = 5;
 const int kTextPartPacketType = 6;
 const int kTextHeadChars = 9;
 const int kTextPartChars = 17;
-const int kMaxTextFragments = 8; // 4-bit field allows 15; kept lower for airtime
-const int kMaxTextLength = kTextHeadChars + kTextPartChars * (kMaxTextFragments - 1); // 128
+const int kMaxTextFragments =
+    8; // 4-bit field allows 15; kept lower for airtime
+const int kMaxTextLength =
+    kTextHeadChars + kTextPartChars * (kMaxTextFragments - 1); // 128
 
 /// What a text message is for. An [announcement] is an advisory from a
 /// volunteer to everyone in range regardless of Dindi — route changes,
@@ -122,7 +133,8 @@ const int kLocationPacketLength = 1 + 4 + 4 + 4; // type + msgId + lat + lon
 const int kLostDetailPacketType = 3;
 const int kLostDetailNameLength = 12;
 const int kLostDetailAgeLength = 3;
-const int kLostDetailPacketLength = 1 + 4 + kLostDetailNameLength + kLostDetailAgeLength;
+const int kLostDetailPacketLength =
+    1 + 4 + kLostDetailNameLength + kLostDetailAgeLength;
 
 // RESPONSE packets — ACK (type 7) and RESOLVE (type 8).
 //
@@ -159,7 +171,8 @@ const int kAckPacketType = 7;
 const int kAckPacketLength = 1 + 4 + 6; // type + msgId + responder meshId
 
 const int kResolvePacketType = 8;
-const int kResolvePacketLength = 1 + 4 + 6 + 1; // type + msgId + meshId + reason
+const int kResolvePacketLength =
+    1 + 4 + 6 + 1; // type + msgId + meshId + reason
 
 /// Why an alert was closed. [kResolveFound] is the one that matters — the
 /// missing person is back with their people — and is worded that way
@@ -281,7 +294,8 @@ String stationAnnounceLabel(int station) => '${stationLabel(station)} help';
 // treats "can I hear it at all" as the proximity signal for exactly this
 // kind of beacon. HELP_POINT follows the same rule.
 const int kHelpPointPacketType = 9;
-const int kHelpPointPacketLength = 1 + 1 + 4 + 1 + 1 + 6 + 1; // 15 bytes — same budget as MeshPacket
+const int kHelpPointPacketLength =
+    1 + 1 + 4 + 1 + 1 + 6 + 1; // 15 bytes — same budget as MeshPacket
 
 const int kHelpStatusOpen = 0;
 const int kHelpStatusClosed = 1;
@@ -361,7 +375,8 @@ class HelpPointPacket {
     // An unrecognised station code (from a newer build, or a corrupt
     // advertisement) must not render as a help point of some undefined
     // kind — see the same guard on PresencePacket.decode.
-    if (!kStationTypes.contains(helpType) || helpType == kStationNone) return null;
+    if (!kStationTypes.contains(helpType) || helpType == kStationNone)
+      return null;
     return HelpPointPacket(
       ttl: raw[1],
       msgId: msgId,
@@ -373,13 +388,13 @@ class HelpPointPacket {
   }
 
   HelpPointPacket relayed() => HelpPointPacket(
-        ttl: ttl - 1,
-        msgId: msgId,
-        helpType: helpType,
-        status: status,
-        senderLabel: senderLabel,
-        expiresInMinutesDiv5: expiresInMinutesDiv5,
-      );
+    ttl: ttl - 1,
+    msgId: msgId,
+    helpType: helpType,
+    status: status,
+    senderLabel: senderLabel,
+    expiresInMinutesDiv5: expiresInMinutesDiv5,
+  );
 }
 
 /// "This help point is closed / limited now." The HELP_POINT counterpart to
@@ -426,7 +441,8 @@ class HelpPointStatusPacket {
 }
 
 const int kHelpPointStatusPacketType = 10;
-const int kHelpPointStatusPacketLength = 1 + 4 + 6 + 1; // 12 bytes — same shape as ResolvePacket
+const int kHelpPointStatusPacketLength =
+    1 + 4 + 6 + 1; // 12 bytes — same shape as ResolvePacket
 
 /// A help point as stored on this phone — the durable counterpart to
 /// [HelpPointPacket], same relationship [AlertRecord] has to [MeshPacket].
@@ -489,36 +505,36 @@ class HelpPointRecord {
   }
 
   Map<String, Object?> toMap() => {
-        'msg_id': msgId,
-        'help_type': helpType,
-        'sender_label': senderLabel,
-        'sender_name': senderName,
-        'received_at': receivedAt.millisecondsSinceEpoch,
-        'expires_at': expiresAt.millisecondsSinceEpoch,
-        'hops': hops,
-        'mine': mine ? 1 : 0,
-        'status': status,
-        'closed_by': closedBy,
-        'closed_at': closedAt?.millisecondsSinceEpoch,
-        'acknowledged': acknowledged ? 1 : 0,
-      };
+    'msg_id': msgId,
+    'help_type': helpType,
+    'sender_label': senderLabel,
+    'sender_name': senderName,
+    'received_at': receivedAt.millisecondsSinceEpoch,
+    'expires_at': expiresAt.millisecondsSinceEpoch,
+    'hops': hops,
+    'mine': mine ? 1 : 0,
+    'status': status,
+    'closed_by': closedBy,
+    'closed_at': closedAt?.millisecondsSinceEpoch,
+    'acknowledged': acknowledged ? 1 : 0,
+  };
 
   static HelpPointRecord fromMap(Map<String, Object?> map) => HelpPointRecord(
-        msgId: map['msg_id'] as int,
-        helpType: map['help_type'] as int,
-        senderLabel: map['sender_label'] as String,
-        senderName: map['sender_name'] as String?,
-        receivedAt: DateTime.fromMillisecondsSinceEpoch(map['received_at'] as int),
-        expiresAt: DateTime.fromMillisecondsSinceEpoch(map['expires_at'] as int),
-        hops: (map['hops'] as int?) ?? 0,
-        mine: ((map['mine'] as int?) ?? 0) == 1,
-        status: (map['status'] as int?) ?? kHelpStatusOpen,
-        closedBy: map['closed_by'] as String?,
-        closedAt: map['closed_at'] == null
-            ? null
-            : DateTime.fromMillisecondsSinceEpoch(map['closed_at'] as int),
-        acknowledged: ((map['acknowledged'] as int?) ?? 0) == 1,
-      );
+    msgId: map['msg_id'] as int,
+    helpType: map['help_type'] as int,
+    senderLabel: map['sender_label'] as String,
+    senderName: map['sender_name'] as String?,
+    receivedAt: DateTime.fromMillisecondsSinceEpoch(map['received_at'] as int),
+    expiresAt: DateTime.fromMillisecondsSinceEpoch(map['expires_at'] as int),
+    hops: (map['hops'] as int?) ?? 0,
+    mine: ((map['mine'] as int?) ?? 0) == 1,
+    status: (map['status'] as int?) ?? kHelpStatusOpen,
+    closedBy: map['closed_by'] as String?,
+    closedAt: map['closed_at'] == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(map['closed_at'] as int),
+    acknowledged: ((map['acknowledged'] as int?) ?? 0) == 1,
+  );
 }
 
 // Alphabet avoids visually-ambiguous characters (0/O, 1/I/L) since a Mesh ID
@@ -536,9 +552,58 @@ const String _kMeshIdAlphabet = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 String generateMeshId(UserRole role) {
   final rand = Random.secure();
   final prefix = role == UserRole.warkari ? 'W' : 'V';
-  final body = List.generate(5, (_) => _kMeshIdAlphabet[rand.nextInt(_kMeshIdAlphabet.length)]).join();
+  final body = List.generate(
+    5,
+    (_) => _kMeshIdAlphabet[rand.nextInt(_kMeshIdAlphabet.length)],
+  ).join();
   return '$prefix$body';
 }
+
+// ---------------------------------------------------------------------------
+// Wari Emergency Response Network — routing an SOS to a Warkari's Dindi
+// Lead as well as to Volunteers, without touching MeshPacket, LocationPacket,
+// AckPacket or ResolvePacket at all.
+//
+// Nothing here rides a new packet. "Is this SOS mine to lead" is just
+// `packet.groupTag == myGroupTag && amDindiLead` — both already on the wire
+// or already known locally. "Who is responding" needs no new field either:
+// [generateMeshId] already prefixes every Mesh ID with its role letter, and
+// combined with the Dindi Lead flag PresencePacket now carries (see
+// kPresenceFullLength), that's enough to label an ACK's responder without
+// touching AckPacket's 11 bytes.
+
+/// How a responder should be named on someone else's screen — "Sunita ·
+/// Volunteer" or "Rahul · Dindi Lead" — derived purely from the Mesh ID's
+/// role letter plus whether a presence beacon has flagged that id as a
+/// Dindi Lead. [isDindiLead] is the caller's lookup (MeshService keeps this
+/// per meshId from presence beacons) so this stays a pure, testable
+/// function with no BLE/DB dependency of its own.
+///
+/// An ordinary Warkari who claims an alert (via "Join anyway") still gets a
+/// label, because ACK doesn't discriminate who's allowed to claim — see the
+/// note on kAckPacketType. There is no fourth "Dindi Lead is also a
+/// Volunteer" case: the mesh ID prefix alone decides Volunteer vs Warkari,
+/// and the two roles are chosen once at sign-in and never mixed.
+String responderRoleLabel(String meshId, {required bool isDindiLead}) {
+  if (meshId.startsWith('V')) return 'Volunteer';
+  if (isDindiLead) return 'Dindi Lead';
+  return 'Warkari';
+}
+
+/// The verb that follows a responder's label — a Lead coordinates, everyone
+/// else responds. Kept separate from [responderRoleLabel] so a caller who
+/// only wants the role word (a chip, a queue filter) isn't forced to build
+/// a whole sentence.
+String responderVerb(String role) =>
+    role == 'Dindi Lead' ? 'is coordinating' : 'is responding';
+
+/// Whether [alert] belongs on a Dindi Lead's "DINDI EMERGENCIES" queue: an
+/// SOS (not a Lost Person report — that already has its own screen), not
+/// sent by this phone, from the Lead's own Dindi. A pure predicate over
+/// [AlertRecord] so it's testable without MeshService/BLE — see
+/// MeshService.dindiEmergencies for where it's actually applied.
+bool isDindiEmergency(AlertRecord alert, String myGroupTag) =>
+    !alert.mine && alert.isSos && alert.groupTag == myGroupTag;
 
 /// A short, deterministic 2-character tag derived from a Dindi/group name
 /// (or volunteer camp ID) so two phones from the same group produce the
@@ -553,7 +618,9 @@ String dindiTagFor(String groupOrId) {
     hash = (hash * 31 + codeUnit) & 0x7FFFFFFF;
   }
   final a = _kMeshIdAlphabet[hash % _kMeshIdAlphabet.length];
-  final b = _kMeshIdAlphabet[(hash ~/ _kMeshIdAlphabet.length) % _kMeshIdAlphabet.length];
+  final b =
+      _kMeshIdAlphabet[(hash ~/ _kMeshIdAlphabet.length) %
+          _kMeshIdAlphabet.length];
   return '$a$b';
 }
 
@@ -604,7 +671,9 @@ class MeshPacket {
     final msgId = ByteData.sublistView(idBytes).getUint32(0, Endian.big);
     final category = raw[6];
     final label = ascii.decode(raw.sublist(7, 13), allowInvalid: true).trim();
-    final groupTag = ascii.decode(raw.sublist(13, 15), allowInvalid: true).trim();
+    final groupTag = ascii
+        .decode(raw.sublist(13, 15), allowInvalid: true)
+        .trim();
     return MeshPacket(
       ttl: ttl,
       msgId: msgId,
@@ -617,12 +686,12 @@ class MeshPacket {
   /// The packet this device re-advertises after deciding to relay: same
   /// identity (msgId/category/sender/group), TTL down by one hop.
   MeshPacket relayed() => MeshPacket(
-        ttl: ttl - 1,
-        msgId: msgId,
-        category: category,
-        senderLabel: senderLabel,
-        groupTag: groupTag,
-      );
+    ttl: ttl - 1,
+    msgId: msgId,
+    category: category,
+    senderLabel: senderLabel,
+    groupTag: groupTag,
+  );
 }
 
 /// "I exist" — broadcast every ~15s (see MeshService._broadcastPresence)
@@ -639,37 +708,55 @@ class PresencePacket {
   /// See the kStation* constants for why this is worth a byte.
   final int station;
 
+  /// Whether this phone is the self-declared Dindi Lead for [groupTag] —
+  /// see the note on kPresenceFullLength above and UserProfile.isDindiLead.
+  /// Self-declared and unauthenticated, exactly like [station]: there is no
+  /// election protocol here, just the same trust model the rest of the mesh
+  /// already runs on.
+  final bool isDindiLead;
+
   PresencePacket({
     required this.meshId,
     required this.groupTag,
     required this.name,
     this.station = kStationNone,
+    this.isDindiLead = false,
   });
 
   bool get isHelpPoint => station != kStationNone;
 
   Uint8List encode() {
-    final bytes = Uint8List(kPresencePacketLength);
+    final bytes = Uint8List(kPresenceFullLength);
     bytes[0] = kPresencePacketType;
     final id = asciiSafe(meshId).padRight(6).substring(0, 6);
     bytes.setRange(1, 7, ascii.encode(id));
     final tag = asciiSafe(groupTag).padRight(2).substring(0, 2);
     bytes.setRange(7, 9, ascii.encode(tag));
-    final displayName = asciiSafe(name).padRight(kPresenceNameLength).substring(0, kPresenceNameLength);
+    final displayName = asciiSafe(
+      name,
+    ).padRight(kPresenceNameLength).substring(0, kPresenceNameLength);
     bytes.setRange(9, 9 + kPresenceNameLength, ascii.encode(displayName));
     bytes[kPresenceBaseLength] = station & 0xFF;
+    bytes[kPresencePacketLength] = isDindiLead ? 1 : 0;
     return bytes;
   }
 
   static PresencePacket? decode(List<int> raw) {
-    // Accepts both the 19-byte original and the 20-byte station form — see
-    // the note on kPresencePacketLength.
+    // Accepts the 19-byte original, the 20-byte station form, and the
+    // 21-byte Dindi Lead form — see the note on kPresenceFullLength.
     if (raw.length < kPresenceBaseLength) return null;
     if (raw[0] != kPresencePacketType) return null;
     final meshId = ascii.decode(raw.sublist(1, 7), allowInvalid: true).trim();
     final groupTag = ascii.decode(raw.sublist(7, 9), allowInvalid: true).trim();
-    final name = ascii.decode(raw.sublist(9, 9 + kPresenceNameLength), allowInvalid: true).trim();
-    final station = raw.length > kPresenceBaseLength ? raw[kPresenceBaseLength] : kStationNone;
+    final name = ascii
+        .decode(raw.sublist(9, 9 + kPresenceNameLength), allowInvalid: true)
+        .trim();
+    final station = raw.length > kPresenceBaseLength
+        ? raw[kPresenceBaseLength]
+        : kStationNone;
+    final leadByte = raw.length > kPresencePacketLength
+        ? raw[kPresencePacketLength]
+        : 0;
     return PresencePacket(
       meshId: meshId,
       groupTag: groupTag,
@@ -677,6 +764,7 @@ class PresencePacket {
       // An unknown station code from a newer build must not render as a
       // help point of some undefined kind — fall back to "not a help point".
       station: kStationTypes.contains(station) ? station : kStationNone,
+      isDindiLead: leadByte == 1,
     );
   }
 }
@@ -705,7 +793,9 @@ class AckPacket {
     if (raw[0] != kAckPacketType) return null;
     final idBytes = Uint8List.fromList(raw.sublist(1, 5));
     final msgId = ByteData.sublistView(idBytes).getUint32(0, Endian.big);
-    final who = ascii.decode(raw.sublist(5, kAckPacketLength), allowInvalid: true).trim();
+    final who = ascii
+        .decode(raw.sublist(5, kAckPacketLength), allowInvalid: true)
+        .trim();
     if (who.isEmpty) return null;
     return AckPacket(msgId: msgId, responderMeshId: who);
   }
@@ -759,17 +849,29 @@ class LostPersonDetailPacket {
   final String name;
   final String age;
 
-  LostPersonDetailPacket({required this.msgId, required this.name, required this.age});
+  LostPersonDetailPacket({
+    required this.msgId,
+    required this.name,
+    required this.age,
+  });
 
   Uint8List encode() {
     final bytes = Uint8List(kLostDetailPacketLength);
     bytes[0] = kLostDetailPacketType;
     final idBytes = ByteData(4)..setUint32(0, msgId, Endian.big);
     bytes.setRange(1, 5, idBytes.buffer.asUint8List());
-    final n = asciiSafe(name).padRight(kLostDetailNameLength).substring(0, kLostDetailNameLength);
+    final n = asciiSafe(
+      name,
+    ).padRight(kLostDetailNameLength).substring(0, kLostDetailNameLength);
     bytes.setRange(5, 5 + kLostDetailNameLength, ascii.encode(n));
-    final a = asciiSafe(age).padRight(kLostDetailAgeLength).substring(0, kLostDetailAgeLength);
-    bytes.setRange(5 + kLostDetailNameLength, kLostDetailPacketLength, ascii.encode(a));
+    final a = asciiSafe(
+      age,
+    ).padRight(kLostDetailAgeLength).substring(0, kLostDetailAgeLength);
+    bytes.setRange(
+      5 + kLostDetailNameLength,
+      kLostDetailPacketLength,
+      ascii.encode(a),
+    );
     return bytes;
   }
 
@@ -778,8 +880,15 @@ class LostPersonDetailPacket {
     if (raw[0] != kLostDetailPacketType) return null;
     final idBytes = Uint8List.fromList(raw.sublist(1, 5));
     final msgId = ByteData.sublistView(idBytes).getUint32(0, Endian.big);
-    final name = ascii.decode(raw.sublist(5, 5 + kLostDetailNameLength), allowInvalid: true).trim();
-    final age = ascii.decode(raw.sublist(5 + kLostDetailNameLength, kLostDetailPacketLength), allowInvalid: true).trim();
+    final name = ascii
+        .decode(raw.sublist(5, 5 + kLostDetailNameLength), allowInvalid: true)
+        .trim();
+    final age = ascii
+        .decode(
+          raw.sublist(5 + kLostDetailNameLength, kLostDetailPacketLength),
+          allowInvalid: true,
+        )
+        .trim();
     return LostPersonDetailPacket(msgId: msgId, name: name, age: age);
   }
 }
@@ -791,7 +900,11 @@ class LocationPacket {
   final double latitude;
   final double longitude;
 
-  LocationPacket({required this.msgId, required this.latitude, required this.longitude});
+  LocationPacket({
+    required this.msgId,
+    required this.latitude,
+    required this.longitude,
+  });
 
   Uint8List encode() {
     final bytes = Uint8List(kLocationPacketLength);
@@ -807,7 +920,9 @@ class LocationPacket {
   static LocationPacket? decode(List<int> raw) {
     if (raw.length < kLocationPacketLength) return null;
     if (raw[0] != kLocationPacketType) return null;
-    final view = ByteData.sublistView(Uint8List.fromList(raw.sublist(1, kLocationPacketLength)));
+    final view = ByteData.sublistView(
+      Uint8List.fromList(raw.sublist(1, kLocationPacketLength)),
+    );
     final lat = view.getInt32(4, Endian.big) / 1e7;
     final lon = view.getInt32(8, Endian.big) / 1e7;
     // A corrupt advertisement can decode to coordinates that aren't on
@@ -852,9 +967,23 @@ class TextHeadPacket {
     bytes[5] = ttl & 0xFF;
     // Two 4-bit fields in one byte: kind above, fragment count below.
     bytes[6] = ((kind & 0x0F) << 4) | (fragTotal & 0x0F);
-    bytes.setRange(7, 9, ascii.encode(asciiSafe(groupTag).padRight(2).substring(0, 2)));
-    bytes.setRange(9, 15, ascii.encode(asciiSafe(senderLabel).padRight(6).substring(0, 6)));
-    bytes.setRange(15, 24, ascii.encode(asciiSafe(chunk).padRight(kTextHeadChars).substring(0, kTextHeadChars)));
+    bytes.setRange(
+      7,
+      9,
+      ascii.encode(asciiSafe(groupTag).padRight(2).substring(0, 2)),
+    );
+    bytes.setRange(
+      9,
+      15,
+      ascii.encode(asciiSafe(senderLabel).padRight(6).substring(0, 6)),
+    );
+    bytes.setRange(
+      15,
+      24,
+      ascii.encode(
+        asciiSafe(chunk).padRight(kTextHeadChars).substring(0, kTextHeadChars),
+      ),
+    );
     return bytes;
   }
 
@@ -879,9 +1008,14 @@ class TextHeadPacket {
   }
 
   TextHeadPacket relayed() => TextHeadPacket(
-        msgId: msgId, ttl: ttl - 1, kind: kind, fragTotal: fragTotal,
-        groupTag: groupTag, senderLabel: senderLabel, chunk: chunk,
-      );
+    msgId: msgId,
+    ttl: ttl - 1,
+    kind: kind,
+    fragTotal: fragTotal,
+    groupTag: groupTag,
+    senderLabel: senderLabel,
+    chunk: chunk,
+  );
 }
 
 /// A continuation fragment: [index] is 1-based, since fragment 0 is the
@@ -893,7 +1027,12 @@ class TextPartPacket {
   final int index;
   final String chunk;
 
-  TextPartPacket({required this.msgId, required this.ttl, required this.index, required this.chunk});
+  TextPartPacket({
+    required this.msgId,
+    required this.ttl,
+    required this.index,
+    required this.chunk,
+  });
 
   Uint8List encode() {
     final bytes = Uint8List(24);
@@ -902,7 +1041,13 @@ class TextPartPacket {
     bytes.setRange(1, 5, id.buffer.asUint8List());
     bytes[5] = ttl & 0xFF;
     bytes[6] = index & 0xFF;
-    bytes.setRange(7, 24, ascii.encode(asciiSafe(chunk).padRight(kTextPartChars).substring(0, kTextPartChars)));
+    bytes.setRange(
+      7,
+      24,
+      ascii.encode(
+        asciiSafe(chunk).padRight(kTextPartChars).substring(0, kTextPartChars),
+      ),
+    );
     return bytes;
   }
 
@@ -934,10 +1079,16 @@ class TextPartPacket {
   required String body,
 }) {
   final safe = asciiSafe(body).trim();
-  final text = safe.length > kMaxTextLength ? safe.substring(0, kMaxTextLength) : safe;
+  final text = safe.length > kMaxTextLength
+      ? safe.substring(0, kMaxTextLength)
+      : safe;
 
-  final headChunk = text.length <= kTextHeadChars ? text : text.substring(0, kTextHeadChars);
-  final rest = text.length <= kTextHeadChars ? '' : text.substring(kTextHeadChars);
+  final headChunk = text.length <= kTextHeadChars
+      ? text
+      : text.substring(0, kTextHeadChars);
+  final rest = text.length <= kTextHeadChars
+      ? ''
+      : text.substring(kTextHeadChars);
 
   final chunks = <String>[];
   for (var i = 0; i < rest.length; i += kTextPartChars) {
@@ -990,29 +1141,31 @@ class MeshTextMessage {
   /// beacon has told us a real name.
   String get displayName => outgoing
       ? 'You'
-      : (senderName == null || senderName!.isEmpty) ? senderLabel : senderName!;
+      : (senderName == null || senderName!.isEmpty)
+      ? senderLabel
+      : senderName!;
 
   Map<String, Object?> toMap() => {
-        'msg_id': msgId,
-        'kind': kind,
-        'group_tag': groupTag,
-        'sender_label': senderLabel,
-        'sender_name': senderName,
-        'body': body,
-        'created_at': createdAt.millisecondsSinceEpoch,
-        'outgoing': outgoing ? 1 : 0,
-      };
+    'msg_id': msgId,
+    'kind': kind,
+    'group_tag': groupTag,
+    'sender_label': senderLabel,
+    'sender_name': senderName,
+    'body': body,
+    'created_at': createdAt.millisecondsSinceEpoch,
+    'outgoing': outgoing ? 1 : 0,
+  };
 
   static MeshTextMessage fromMap(Map<String, Object?> m) => MeshTextMessage(
-        msgId: m['msg_id'] as int,
-        kind: m['kind'] as int,
-        groupTag: m['group_tag'] as String,
-        senderLabel: m['sender_label'] as String,
-        senderName: m['sender_name'] as String?,
-        body: m['body'] as String,
-        createdAt: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int),
-        outgoing: (m['outgoing'] as int? ?? 0) == 1,
-      );
+    msgId: m['msg_id'] as int,
+    kind: m['kind'] as int,
+    groupTag: m['group_tag'] as String,
+    senderLabel: m['sender_label'] as String,
+    senderName: m['sender_name'] as String?,
+    body: m['body'] as String,
+    createdAt: DateTime.fromMillisecondsSinceEpoch(m['created_at'] as int),
+    outgoing: (m['outgoing'] as int? ?? 0) == 1,
+  );
 }
 
 /// An alert this phone received and hasn't been acknowledged yet — what
@@ -1066,8 +1219,14 @@ class IncomingAlert {
     final b = bearingDegrees;
     if (b == null) return null;
     const points = [
-      'north', 'north-east', 'east', 'south-east',
-      'south', 'south-west', 'west', 'north-west',
+      'north',
+      'north-east',
+      'east',
+      'south-east',
+      'south',
+      'south-west',
+      'west',
+      'north-west',
     ];
     return points[(((b % 360) + 360) % 360 / 45).round() % 8];
   }
@@ -1180,8 +1339,14 @@ class AlertRecord {
     final b = bearingDegrees;
     if (b == null) return null;
     const points = [
-      'north', 'north-east', 'east', 'south-east',
-      'south', 'south-west', 'west', 'north-west',
+      'north',
+      'north-east',
+      'east',
+      'south-east',
+      'south',
+      'south-west',
+      'west',
+      'north-west',
     ];
     return points[(((b % 360) + 360) % 360 / 45).round() % 8];
   }
@@ -1208,44 +1373,44 @@ class AlertRecord {
   }
 
   Map<String, Object?> toMap() => {
-        'msg_id': msgId,
-        'category': category,
-        'sender_label': senderLabel,
-        'sender_name': senderName,
-        'group_tag': groupTag,
-        'received_at': receivedAt.millisecondsSinceEpoch,
-        'hops': hops,
-        'mine': mine ? 1 : 0,
-        'lost_name': lostName,
-        'lost_age': lostAge,
-        'latitude': latitude,
-        'longitude': longitude,
-        'claimed_by': claimedBy,
-        'claimed_at': claimedAt?.millisecondsSinceEpoch,
-        'resolved_by': resolvedBy,
-        'resolved_reason': resolvedReason,
-        'resolved_at': resolvedAt?.millisecondsSinceEpoch,
-      };
+    'msg_id': msgId,
+    'category': category,
+    'sender_label': senderLabel,
+    'sender_name': senderName,
+    'group_tag': groupTag,
+    'received_at': receivedAt.millisecondsSinceEpoch,
+    'hops': hops,
+    'mine': mine ? 1 : 0,
+    'lost_name': lostName,
+    'lost_age': lostAge,
+    'latitude': latitude,
+    'longitude': longitude,
+    'claimed_by': claimedBy,
+    'claimed_at': claimedAt?.millisecondsSinceEpoch,
+    'resolved_by': resolvedBy,
+    'resolved_reason': resolvedReason,
+    'resolved_at': resolvedAt?.millisecondsSinceEpoch,
+  };
 
   static AlertRecord fromMap(Map<String, Object?> map) => AlertRecord(
-        msgId: map['msg_id'] as int,
-        category: map['category'] as int,
-        senderLabel: map['sender_label'] as String,
-        senderName: map['sender_name'] as String?,
-        groupTag: map['group_tag'] as String?,
-        receivedAt: DateTime.fromMillisecondsSinceEpoch(map['received_at'] as int),
-        hops: (map['hops'] as int?) ?? 0,
-        mine: ((map['mine'] as int?) ?? 0) == 1,
-        lostName: map['lost_name'] as String?,
-        lostAge: map['lost_age'] as String?,
-        latitude: map['latitude'] as double?,
-        longitude: map['longitude'] as double?,
-        claimedBy: map['claimed_by'] as String?,
-        claimedAt: _time(map['claimed_at']),
-        resolvedBy: map['resolved_by'] as String?,
-        resolvedReason: map['resolved_reason'] as int?,
-        resolvedAt: _time(map['resolved_at']),
-      );
+    msgId: map['msg_id'] as int,
+    category: map['category'] as int,
+    senderLabel: map['sender_label'] as String,
+    senderName: map['sender_name'] as String?,
+    groupTag: map['group_tag'] as String?,
+    receivedAt: DateTime.fromMillisecondsSinceEpoch(map['received_at'] as int),
+    hops: (map['hops'] as int?) ?? 0,
+    mine: ((map['mine'] as int?) ?? 0) == 1,
+    lostName: map['lost_name'] as String?,
+    lostAge: map['lost_age'] as String?,
+    latitude: map['latitude'] as double?,
+    longitude: map['longitude'] as double?,
+    claimedBy: map['claimed_by'] as String?,
+    claimedAt: _time(map['claimed_at']),
+    resolvedBy: map['resolved_by'] as String?,
+    resolvedReason: map['resolved_reason'] as int?,
+    resolvedAt: _time(map['resolved_at']),
+  );
 
   static DateTime? _time(Object? raw) =>
       raw == null ? null : DateTime.fromMillisecondsSinceEpoch(raw as int);
@@ -1307,8 +1472,10 @@ enum UserRole {
 
   String get label => this == UserRole.warkari ? 'Warkari' : 'Volunteer';
 
-  static UserRole fromName(String name) =>
-      UserRole.values.firstWhere((r) => r.name == name, orElse: () => UserRole.volunteer);
+  static UserRole fromName(String name) => UserRole.values.firstWhere(
+    (r) => r.name == name,
+    orElse: () => UserRole.volunteer,
+  );
 }
 
 /// The locally-registered person using this phone. WariMesh has no server
@@ -1321,8 +1488,10 @@ class UserProfile {
   final String name;
   final String phone;
   final UserRole role;
-  final String groupOrId; // Dindi/group name for a warkari, volunteer/camp ID for a volunteer
-  final String meshId; // persistent mesh identity, e.g. "W7K2M9" — see generateMeshId()
+  final String
+  groupOrId; // Dindi/group name for a warkari, volunteer/camp ID for a volunteer
+  final String
+  meshId; // persistent mesh identity, e.g. "W7K2M9" — see generateMeshId()
   final DateTime loggedInAt;
 
   /// Which kind of help point this person is currently staffing, or
@@ -1332,6 +1501,16 @@ class UserProfile {
   /// have to remember to re-announce it after their phone reboots.
   final int station;
 
+  /// Whether this person has declared themselves the Dindi Lead of
+  /// [groupOrId] — see the note above generateMeshId() for how this reaches
+  /// the mesh (a PresencePacket bit, not a new packet type) and
+  /// alerts_screen.dart/home_widgets.dart for where it changes the UI.
+  /// Only meaningful for a warkari; a volunteer is always false, same
+  /// reasoning as [station] being kStationNone for a warkari. Self-declared
+  /// and unauthenticated — there is no election here, same trust model as
+  /// going on duty at a help point.
+  final bool isDindiLead;
+
   const UserProfile({
     required this.name,
     required this.phone,
@@ -1340,9 +1519,11 @@ class UserProfile {
     required this.meshId,
     required this.loggedInAt,
     this.station = kStationNone,
+    this.isDindiLead = false,
   });
 
-  UserProfile copyWith({String? groupOrId, int? station}) => UserProfile(
+  UserProfile copyWith({String? groupOrId, int? station, bool? isDindiLead}) =>
+      UserProfile(
         name: name,
         phone: phone,
         role: role,
@@ -1350,6 +1531,7 @@ class UserProfile {
         meshId: meshId,
         loggedInAt: loggedInAt,
         station: station ?? this.station,
+        isDindiLead: isDindiLead ?? this.isDindiLead,
       );
 
   /// This person's Dindi/camp tag, for the mesh's notification-tiering
@@ -1357,29 +1539,34 @@ class UserProfile {
   String get dindiTag => dindiTagFor(groupOrId);
 
   Map<String, Object?> toMap() => {
-        'name': name,
-        'phone': phone,
-        'role': role.name,
-        'volunteer_id': groupOrId,
-        'mesh_id': meshId,
-        'logged_in_at': loggedInAt.millisecondsSinceEpoch,
-        'station': station,
-      };
+    'name': name,
+    'phone': phone,
+    'role': role.name,
+    'volunteer_id': groupOrId,
+    'mesh_id': meshId,
+    'logged_in_at': loggedInAt.millisecondsSinceEpoch,
+    'station': station,
+    'is_dindi_lead': isDindiLead ? 1 : 0,
+  };
 
   static UserProfile fromMap(Map<String, Object?> map) => UserProfile(
-        name: map['name'] as String,
-        phone: map['phone'] as String,
-        role: UserRole.fromName(map['role'] as String? ?? 'volunteer'),
-        groupOrId: map['volunteer_id'] as String,
-        // Pre-existing rows (signed in before Mesh IDs existed) won't have
-        // one yet — generate on first read rather than crash. It's saved
-        // back to the DB by UserDb.current() so it becomes permanent from
-        // that point on, same as any other profile's Mesh ID.
-        meshId: (map['mesh_id'] as String?) ??
-            generateMeshId(UserRole.fromName(map['role'] as String? ?? 'volunteer')),
-        loggedInAt: DateTime.fromMillisecondsSinceEpoch(map['logged_in_at'] as int),
-        station: (map['station'] as int?) ?? kStationNone,
-      );
+    name: map['name'] as String,
+    phone: map['phone'] as String,
+    role: UserRole.fromName(map['role'] as String? ?? 'volunteer'),
+    groupOrId: map['volunteer_id'] as String,
+    // Pre-existing rows (signed in before Mesh IDs existed) won't have
+    // one yet — generate on first read rather than crash. It's saved
+    // back to the DB by UserDb.current() so it becomes permanent from
+    // that point on, same as any other profile's Mesh ID.
+    meshId:
+        (map['mesh_id'] as String?) ??
+        generateMeshId(
+          UserRole.fromName(map['role'] as String? ?? 'volunteer'),
+        ),
+    loggedInAt: DateTime.fromMillisecondsSinceEpoch(map['logged_in_at'] as int),
+    station: (map['station'] as int?) ?? kStationNone,
+    isDindiLead: ((map['is_dindi_lead'] as int?) ?? 0) == 1,
+  );
 }
 
 class LostReport {
@@ -1434,34 +1621,34 @@ class LostReport {
   }
 
   Map<String, Object?> toMap() => {
-        'id': id,
-        'name': name,
-        'age': age,
-        'description': description,
-        'last_seen_location': lastSeenLocation,
-        'contact_info': contactInfo,
-        'avatar_icon_index': avatarIconIndex,
-        'avatar_color_index': avatarColorIndex,
-        'created_at': createdAt.millisecondsSinceEpoch,
-        'msg_id': msgId,
-        'broadcast_at': broadcastAt?.millisecondsSinceEpoch,
-        'found': found ? 1 : 0,
-      };
+    'id': id,
+    'name': name,
+    'age': age,
+    'description': description,
+    'last_seen_location': lastSeenLocation,
+    'contact_info': contactInfo,
+    'avatar_icon_index': avatarIconIndex,
+    'avatar_color_index': avatarColorIndex,
+    'created_at': createdAt.millisecondsSinceEpoch,
+    'msg_id': msgId,
+    'broadcast_at': broadcastAt?.millisecondsSinceEpoch,
+    'found': found ? 1 : 0,
+  };
 
   static LostReport fromMap(Map<String, Object?> map) => LostReport(
-        id: map['id'] as int?,
-        name: map['name'] as String,
-        age: map['age'] as String,
-        description: map['description'] as String,
-        lastSeenLocation: map['last_seen_location'] as String,
-        contactInfo: map['contact_info'] as String,
-        avatarIconIndex: map['avatar_icon_index'] as int,
-        avatarColorIndex: map['avatar_color_index'] as int,
-        createdAt: DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int),
-        msgId: map['msg_id'] as int?,
-        broadcastAt: map['broadcast_at'] == null
-            ? null
-            : DateTime.fromMillisecondsSinceEpoch(map['broadcast_at'] as int),
-        found: (map['found'] as int? ?? 0) == 1,
-      );
+    id: map['id'] as int?,
+    name: map['name'] as String,
+    age: map['age'] as String,
+    description: map['description'] as String,
+    lastSeenLocation: map['last_seen_location'] as String,
+    contactInfo: map['contact_info'] as String,
+    avatarIconIndex: map['avatar_icon_index'] as int,
+    avatarColorIndex: map['avatar_color_index'] as int,
+    createdAt: DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int),
+    msgId: map['msg_id'] as int?,
+    broadcastAt: map['broadcast_at'] == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(map['broadcast_at'] as int),
+    found: (map['found'] as int? ?? 0) == 1,
+  );
 }

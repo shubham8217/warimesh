@@ -51,7 +51,10 @@ void main() {
     // the first open. Sharing a filename makes them race.
     AppDatabase.databaseName = 'warimesh_migration_test.db';
 
-    final path = p.join(await databaseFactory.getDatabasesPath(), AppDatabase.databaseName);
+    final path = p.join(
+      await databaseFactory.getDatabasesPath(),
+      AppDatabase.databaseName,
+    );
     await databaseFactory.deleteDatabase(path);
 
     // Version 2, which is what makes this bite. volunteer_profile did not
@@ -86,25 +89,30 @@ void main() {
     await expectLater(AppDatabase.instance, completes);
   });
 
-  test('an upgraded database accepts a sign-in using every new column', () async {
-    // The user-visible symptom on the phone: signing in did nothing, because
-    // the database behind it had failed to open at all.
-    await UserDb.save(UserProfile(
-      name: 'Sunita Kale',
-      phone: '555-0100',
-      role: UserRole.volunteer,
-      groupOrId: 'Camp 4',
-      meshId: 'V7K2M9',
-      loggedInAt: DateTime.now(),
-      station: kStationMedical,
-    ));
+  test(
+    'an upgraded database accepts a sign-in using every new column',
+    () async {
+      // The user-visible symptom on the phone: signing in did nothing, because
+      // the database behind it had failed to open at all.
+      await UserDb.save(
+        UserProfile(
+          name: 'Sunita Kale',
+          phone: '555-0100',
+          role: UserRole.volunteer,
+          groupOrId: 'Camp 4',
+          meshId: 'V7K2M9',
+          loggedInAt: DateTime.now(),
+          station: kStationMedical,
+        ),
+      );
 
-    final restored = (await UserDb.current())!;
-    expect(restored.name, 'Sunita Kale');
-    expect(restored.role, UserRole.volunteer);
-    expect(restored.meshId, 'V7K2M9');
-    expect(restored.station, kStationMedical);
-  });
+      final restored = (await UserDb.current())!;
+      expect(restored.name, 'Sunita Kale');
+      expect(restored.role, UserRole.volunteer);
+      expect(restored.meshId, 'V7K2M9');
+      expect(restored.station, kStationMedical);
+    },
+  );
 
   test('history written by the old build survives the upgrade', () async {
     // A migration that silently dropped the dedup ledger would make every
@@ -114,26 +122,54 @@ void main() {
   });
 
   test('tables introduced after v3 exist and are usable', () async {
-    await AlertsDb.insertIfNew(AlertRecord(
-      msgId: 777,
-      category: kCategorySos,
-      senderLabel: 'W7K2M9',
-      receivedAt: DateTime.now(),
-    ));
+    await AlertsDb.insertIfNew(
+      AlertRecord(
+        msgId: 777,
+        category: kCategorySos,
+        senderLabel: 'W7K2M9',
+        receivedAt: DateTime.now(),
+      ),
+    );
     expect((await AlertsDb.all()).any((a) => a.msgId == 777), isTrue);
   });
 
-  test('help_points (introduced at v9) exists on a database upgraded from v2', () async {
-    // Same failure mode this whole file guards against, one migration step
-    // later: a database that never saw v9's onUpgrade branch must still end
-    // up with a usable help_points table.
-    await HelpPointsDb.insertIfNew(HelpPointRecord(
-      msgId: 888,
-      helpType: kStationMedical,
-      senderLabel: 'V7K2M9',
-      receivedAt: DateTime.now(),
-      expiresAt: DateTime.now().add(const Duration(hours: 2)),
-    ));
-    expect((await HelpPointsDb.all()).any((h) => h.msgId == 888), isTrue);
-  });
+  test(
+    'is_dindi_lead (introduced at v10) exists on a database upgraded from v2',
+    () async {
+      // Same failure mode this file guards against, one migration step later
+      // still: a database that never saw v10's onUpgrade branch must still
+      // accept a Dindi Lead flag rather than throwing "no such column".
+      await UserDb.save(
+        UserProfile(
+          name: 'Rahul Jadhav',
+          phone: '555-0200',
+          role: UserRole.warkari,
+          groupOrId: 'Dindi 127',
+          meshId: 'W4B2XY',
+          loggedInAt: DateTime.now(),
+          isDindiLead: true,
+        ),
+      );
+      expect((await UserDb.current())!.isDindiLead, isTrue);
+    },
+  );
+
+  test(
+    'help_points (introduced at v9) exists on a database upgraded from v2',
+    () async {
+      // Same failure mode this whole file guards against, one migration step
+      // later: a database that never saw v9's onUpgrade branch must still end
+      // up with a usable help_points table.
+      await HelpPointsDb.insertIfNew(
+        HelpPointRecord(
+          msgId: 888,
+          helpType: kStationMedical,
+          senderLabel: 'V7K2M9',
+          receivedAt: DateTime.now(),
+          expiresAt: DateTime.now().add(const Duration(hours: 2)),
+        ),
+      );
+      expect((await HelpPointsDb.all()).any((h) => h.msgId == 888), isTrue);
+    },
+  );
 }

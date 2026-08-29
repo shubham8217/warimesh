@@ -18,7 +18,11 @@ import 'warkari_home_screen.dart';
 class WarkariShell extends StatefulWidget {
   final UserProfile warkari;
   final VoidCallback onLogout;
-  const WarkariShell({super.key, required this.warkari, required this.onLogout});
+  const WarkariShell({
+    super.key,
+    required this.warkari,
+    required this.onLogout,
+  });
 
   @override
   State<WarkariShell> createState() => _WarkariShellState();
@@ -34,7 +38,10 @@ class _WarkariShellState extends State<WarkariShell> {
   // missing-person reports. Inference is entirely on-device (see
   // llm_service.dart), which is the only kind that makes sense in an app
   // whose premise is having no network.
-  late final LlmService llm = LlmService(mesh: mesh, volunteerName: widget.warkari.name);
+  late final LlmService llm = LlmService(
+    mesh: mesh,
+    volunteerName: widget.warkari.name,
+  );
 
   @override
   void initState() {
@@ -49,14 +56,12 @@ class _WarkariShellState extends State<WarkariShell> {
   /// tag, and rebuilds so the Home screen reflects the new Dindi
   /// immediately without needing to sign out and back in.
   Future<void> _setDindi(String name) async {
-    final updated = UserProfile(
-      name: _profile.name,
-      phone: _profile.phone,
-      role: _profile.role,
-      groupOrId: name,
-      meshId: _profile.meshId,
-      loggedInAt: _profile.loggedInAt,
-    );
+    // copyWith rather than reconstructing UserProfile from scratch: the old
+    // form here silently dropped isDindiLead (and, before this feature,
+    // station too) back to its default every time someone changed Dindi —
+    // switching Dindi would silently un-declare a Lead. Worth fixing now
+    // since it's exactly the field this feature adds.
+    final updated = _profile.copyWith(groupOrId: name);
     try {
       await UserDb.save(updated);
     } catch (_) {
@@ -70,6 +75,21 @@ class _WarkariShellState extends State<WarkariShell> {
     if (mounted) setState(() => _profile = updated);
   }
 
+  /// Declares (or un-declares) this warkari as their Dindi's Lead. See
+  /// UserProfile.isDindiLead and MeshService.setDindiLead for the trust
+  /// model — self-declared, same as a volunteer going on duty.
+  Future<void> _setDindiLead(bool value) async {
+    final updated = _profile.copyWith(isDindiLead: value);
+    try {
+      await UserDb.save(updated);
+    } catch (_) {
+      // Same reasoning as _setDindi: apply it for this session even if it
+      // couldn't be persisted.
+    }
+    mesh.setDindiLead(value);
+    if (mounted) setState(() => _profile = updated);
+  }
+
   @override
   void dispose() {
     mesh.dispose();
@@ -79,10 +99,7 @@ class _WarkariShellState extends State<WarkariShell> {
 
   @override
   Widget build(BuildContext context) {
-    return MeshAlertHost(
-      mesh: mesh,
-      child: _buildShell(context),
-    );
+    return MeshAlertHost(mesh: mesh, child: _buildShell(context));
   }
 
   Widget _buildShell(BuildContext context) {
@@ -107,7 +124,9 @@ class _WarkariShellState extends State<WarkariShell> {
             onLogout: widget.onLogout,
             onOpenSos: () => setState(() => _tab = 1),
             onOpenMissing: () => setState(() => _tab = 2),
+            onOpenChat: () => setState(() => _tab = 3),
             onDindiChanged: _setDindi,
+            onDindiLeadChanged: _setDindiLead,
           ),
           SosScreen(mesh: mesh),
           MissingScreen(mesh: mesh),
@@ -115,14 +134,28 @@ class _WarkariShellState extends State<WarkariShell> {
           AssistantScreen(llm: llm),
         ];
         return Scaffold(
-          body: SafeArea(child: IndexedStack(index: _tab, children: screens)),
+          body: SafeArea(
+            child: IndexedStack(index: _tab, children: screens),
+          ),
           bottomNavigationBar: NavigationBar(
             selectedIndex: _tab,
             onDestinationSelected: (i) => setState(() => _tab = i),
             destinations: [
-              const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
-              const NavigationDestination(icon: Icon(Icons.sos_outlined), selectedIcon: Icon(Icons.sos), label: 'SOS'),
-              const NavigationDestination(icon: Icon(Icons.person_search_outlined), selectedIcon: Icon(Icons.person_search), label: 'Missing'),
+              const NavigationDestination(
+                icon: Icon(Icons.home_outlined),
+                selectedIcon: Icon(Icons.home),
+                label: 'Home',
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.sos_outlined),
+                selectedIcon: Icon(Icons.sos),
+                label: 'SOS',
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.person_search_outlined),
+                selectedIcon: Icon(Icons.person_search),
+                label: 'Missing',
+              ),
               NavigationDestination(
                 icon: Badge(
                   isLabelVisible: mesh.unreadMessages > 0,

@@ -45,7 +45,10 @@ class _RootShellState extends State<RootShell> {
   // what this phone actually knows. Inference is entirely on-device (see
   // llm_service.dart) — the only kind that makes sense in an app whose
   // premise is having no network.
-  late final LlmService llm = LlmService(mesh: mesh, volunteerName: widget.volunteer.name);
+  late final LlmService llm = LlmService(
+    mesh: mesh,
+    volunteerName: widget.volunteer.name,
+  );
 
   @override
   void initState() {
@@ -60,14 +63,11 @@ class _RootShellState extends State<RootShell> {
   /// before, so this path simply didn't exist for a volunteer — they were
   /// stuck with whatever camp ID they typed at sign-in.
   Future<void> _setDindi(String name) async {
-    final updated = UserProfile(
-      name: _profile.name,
-      phone: _profile.phone,
-      role: _profile.role,
-      groupOrId: name,
-      meshId: _profile.meshId,
-      loggedInAt: _profile.loggedInAt,
-    );
+    // copyWith rather than reconstructing UserProfile from scratch — the
+    // old form here silently reset station (and now isDindiLead) back to
+    // their defaults on every Dindi change. See the identical fix and note
+    // in warkari_shell.dart.
+    final updated = _profile.copyWith(groupOrId: name);
     try {
       await UserDb.save(updated);
     } catch (_) {
@@ -117,10 +117,7 @@ class _RootShellState extends State<RootShell> {
 
   @override
   Widget build(BuildContext context) {
-    return MeshAlertHost(
-      mesh: mesh,
-      child: _buildShell(context),
-    );
+    return MeshAlertHost(mesh: mesh, child: _buildShell(context));
   }
 
   Widget _buildShell(BuildContext context) {
@@ -155,12 +152,18 @@ class _RootShellState extends State<RootShell> {
           AssistantScreen(llm: llm),
         ];
         return Scaffold(
-          body: SafeArea(child: IndexedStack(index: _tab, children: screens)),
+          body: SafeArea(
+            child: IndexedStack(index: _tab, children: screens),
+          ),
           bottomNavigationBar: NavigationBar(
             selectedIndex: _tab,
             onDestinationSelected: (i) => setState(() => _tab = i),
             destinations: [
-              const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Duty'),
+              const NavigationDestination(
+                icon: Icon(Icons.home_outlined),
+                selectedIcon: Icon(Icons.home),
+                label: 'Duty',
+              ),
               NavigationDestination(
                 // The badge counts alerts nobody has claimed yet, not all
                 // open ones: a volunteer needs to know how many people are
@@ -174,7 +177,11 @@ class _RootShellState extends State<RootShell> {
                 selectedIcon: const Icon(Icons.notifications),
                 label: 'Alerts',
               ),
-              const NavigationDestination(icon: Icon(Icons.person_search_outlined), selectedIcon: Icon(Icons.person_search), label: 'Missing'),
+              const NavigationDestination(
+                icon: Icon(Icons.person_search_outlined),
+                selectedIcon: Icon(Icons.person_search),
+                label: 'Missing',
+              ),
               const NavigationDestination(
                 icon: Icon(Icons.campaign_outlined),
                 selectedIcon: Icon(Icons.campaign),

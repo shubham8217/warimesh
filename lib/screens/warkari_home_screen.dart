@@ -19,7 +19,9 @@ class WarkariHomeScreen extends StatefulWidget {
   final VoidCallback onLogout;
   final VoidCallback onOpenSos;
   final VoidCallback onOpenMissing;
+  final VoidCallback onOpenChat;
   final ValueChanged<String> onDindiChanged;
+  final ValueChanged<bool> onDindiLeadChanged;
 
   const WarkariHomeScreen({
     super.key,
@@ -28,7 +30,9 @@ class WarkariHomeScreen extends StatefulWidget {
     required this.onLogout,
     required this.onOpenSos,
     required this.onOpenMissing,
+    required this.onOpenChat,
     required this.onDindiChanged,
+    required this.onDindiLeadChanged,
   });
 
   @override
@@ -68,9 +72,12 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
     final AlertRecord? myAlert = myAlerts.isEmpty
         ? null
         : (myAlerts.first.isResolved &&
-                DateTime.now().difference(myAlerts.first.receivedAt).inMinutes > 30
-            ? null
-            : myAlerts.first);
+                  DateTime.now()
+                          .difference(myAlerts.first.receivedAt)
+                          .inMinutes >
+                      30
+              ? null
+              : myAlerts.first);
 
     return CustomScrollView(
       slivers: [
@@ -98,12 +105,21 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
               itemBuilder: (context) => [
                 PopupMenuItem<String>(
                   enabled: false,
-                  child: Text(widget.warkari.name, style: const TextStyle(fontWeight: FontWeight.w700)),
+                  child: Text(
+                    widget.warkari.name,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
                 ),
                 const PopupMenuDivider(),
                 const PopupMenuItem<String>(
                   value: 'logout',
-                  child: Row(children: [Icon(Icons.logout, size: 18), SizedBox(width: 10), Text('Sign out')]),
+                  child: Row(
+                    children: [
+                      Icon(Icons.logout, size: 18),
+                      SizedBox(width: 10),
+                      Text('Sign out'),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -125,8 +141,25 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
                 MyAlertCard(
                   alert: myAlert,
                   nameFor: (id) => mesh.nameFor(id) ?? id,
+                  roleFor: mesh.responderRoleLabelFor,
                 ),
                 const SizedBox(height: 12),
+              ],
+              // Only ever populated when this phone has declared itself the
+              // Dindi Lead (see MeshService.amDindiLead) — an ordinary
+              // Warkari's dindiEmergencies list is always empty, so this
+              // section simply never renders for them. It still shows up
+              // even without myAlert above: a Lead coordinating someone
+              // else's SOS has no alert of their own in flight.
+              if (mesh.amDindiLead) ...[
+                DindiEmergenciesSection(
+                  emergencies: mesh.dindiEmergencies,
+                  mesh: mesh,
+                  dindiName: widget.warkari.groupOrId,
+                  onCoordinate: widget.onOpenChat,
+                ),
+                if (mesh.dindiEmergencies.isNotEmpty)
+                  const SizedBox(height: 12),
               ],
               StatusBox(bluetoothOn: mesh.bluetoothOn, scanningOk: scanningOk),
               const SizedBox(height: 16),
@@ -135,7 +168,8 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
                 points: nearbySeva,
                 onTap: (point) => Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => HelpPointDetailScreen(mesh: mesh, point: point),
+                    builder: (_) =>
+                        HelpPointDetailScreen(mesh: mesh, point: point),
                   ),
                 ),
               ),
@@ -145,6 +179,8 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
                 headcount: mesh.dindiHeadcount,
                 memberNames: mesh.dindiMemberNames,
                 onDindiChanged: widget.onDindiChanged,
+                isDindiLead: mesh.amDindiLead,
+                onDindiLeadChanged: widget.onDindiLeadChanged,
               ),
               const SizedBox(height: 12),
               IntrinsicHeight(

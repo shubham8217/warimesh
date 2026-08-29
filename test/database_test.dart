@@ -39,7 +39,10 @@ void main() {
     // these tests were written: they passed against the very schema bug
     // they were added to catch.
     await databaseFactory.deleteDatabase(
-      p.join(await databaseFactory.getDatabasesPath(), AppDatabase.databaseName),
+      p.join(
+        await databaseFactory.getDatabasesPath(),
+        AppDatabase.databaseName,
+      ),
     );
   });
 
@@ -70,38 +73,86 @@ void main() {
     });
 
     test('a warkari round-trips with no station', () async {
-      await UserDb.save(UserProfile(
-        name: 'Aarav Patil',
-        phone: '555-0101',
-        role: UserRole.warkari,
-        groupOrId: 'Sant Tukaram Dindi',
-        meshId: 'W4B2XY',
-        loggedInAt: DateTime.now(),
-      ));
+      await UserDb.save(
+        UserProfile(
+          name: 'Aarav Patil',
+          phone: '555-0101',
+          role: UserRole.warkari,
+          groupOrId: 'Sant Tukaram Dindi',
+          meshId: 'W4B2XY',
+          loggedInAt: DateTime.now(),
+        ),
+      );
 
       final restored = (await UserDb.current())!;
       expect(restored.role, UserRole.warkari);
       expect(restored.station, kStationNone);
     });
 
-    test('copyWith persists a station change without disturbing identity', () async {
-      final original = UserProfile(
-        name: 'Sunita Kale',
-        phone: '555-0100',
-        role: UserRole.volunteer,
-        groupOrId: 'Camp 4',
-        meshId: 'V7K2M9',
+    test(
+      'copyWith persists a station change without disturbing identity',
+      () async {
+        final original = UserProfile(
+          name: 'Sunita Kale',
+          phone: '555-0100',
+          role: UserRole.volunteer,
+          groupOrId: 'Camp 4',
+          meshId: 'V7K2M9',
+          loggedInAt: DateTime.now(),
+        );
+        await UserDb.save(original);
+        await UserDb.save(original.copyWith(station: kStationWater));
+
+        final restored = (await UserDb.current())!;
+        expect(restored.station, kStationWater);
+        // The Mesh ID must survive going on duty — it is this phone's identity
+        // on the air, and regenerating it would orphan every alert it sent.
+        expect(restored.meshId, 'V7K2M9');
+      },
+    );
+
+    test('a fresh database accepts a Dindi Lead flag', () async {
+      final profile = UserProfile(
+        name: 'Rahul Jadhav',
+        phone: '555-0200',
+        role: UserRole.warkari,
+        groupOrId: 'Dindi 127',
+        meshId: 'W4B2XY',
         loggedInAt: DateTime.now(),
+        isDindiLead: true,
       );
-      await UserDb.save(original);
-      await UserDb.save(original.copyWith(station: kStationWater));
+      await UserDb.save(profile);
 
       final restored = (await UserDb.current())!;
-      expect(restored.station, kStationWater);
-      // The Mesh ID must survive going on duty — it is this phone's identity
-      // on the air, and regenerating it would orphan every alert it sent.
-      expect(restored.meshId, 'V7K2M9');
+      expect(restored.isDindiLead, isTrue);
+      expect(restored.role, UserRole.warkari);
     });
+
+    test(
+      'copyWith toggles isDindiLead without disturbing station or identity',
+      () async {
+        final original = UserProfile(
+          name: 'Rahul Jadhav',
+          phone: '555-0200',
+          role: UserRole.warkari,
+          groupOrId: 'Dindi 127',
+          meshId: 'W4B2XY',
+          loggedInAt: DateTime.now(),
+        );
+        await UserDb.save(original);
+        await UserDb.save(original.copyWith(isDindiLead: true));
+
+        var restored = (await UserDb.current())!;
+        expect(restored.isDindiLead, isTrue);
+
+        // Switching Dindi (the regression the copyWith fix in warkari_shell.dart
+        // guards against) must not silently un-declare the Lead.
+        await UserDb.save(restored.copyWith(groupOrId: 'Dindi 88'));
+        restored = (await UserDb.current())!;
+        expect(restored.isDindiLead, isTrue);
+        expect(restored.groupOrId, 'Dindi 88');
+      },
+    );
   });
 
   group('alerts table', () {
@@ -118,49 +169,65 @@ void main() {
       await AlertsDb.insertIfNew(record);
 
       await AlertsDb.setClaim(record.msgId, 'V4B2XY', DateTime.now());
-      var stored = (await AlertsDb.all()).firstWhere((a) => a.msgId == record.msgId);
+      var stored = (await AlertsDb.all()).firstWhere(
+        (a) => a.msgId == record.msgId,
+      );
       expect(stored.claimedBy, 'V4B2XY');
       expect(stored.isClaimed, isTrue);
 
-      await AlertsDb.setResolved(record.msgId, 'V4B2XY', kResolveFound, DateTime.now());
-      stored = (await AlertsDb.all()).firstWhere((a) => a.msgId == record.msgId);
+      await AlertsDb.setResolved(
+        record.msgId,
+        'V4B2XY',
+        kResolveFound,
+        DateTime.now(),
+      );
+      stored = (await AlertsDb.all()).firstWhere(
+        (a) => a.msgId == record.msgId,
+      );
       expect(stored.isResolved, isTrue);
       expect(stored.resolvedReason, kResolveFound);
 
       await AlertsDb.reopen(record.msgId);
-      stored = (await AlertsDb.all()).firstWhere((a) => a.msgId == record.msgId);
+      stored = (await AlertsDb.all()).firstWhere(
+        (a) => a.msgId == record.msgId,
+      );
       expect(stored.isResolved, isFalse);
       // Reopening restores the queue entry, and the claim on it stands — the
       // volunteer who was responding did not stop responding.
       expect(stored.claimedBy, 'V4B2XY');
     });
 
-    test('re-hearing an alert never clobbers a claim already made on it', () async {
-      // The case this protects: neighbours re-air the same alert for its
-      // whole airtime, so insertIfNew runs repeatedly for one incident. If
-      // it overwrote, a volunteer's claim would be wiped seconds after they
-      // made it and the alert would look unanswered again.
-      final record = AlertRecord(
-        msgId: 42,
-        category: kCategoryLostPerson,
-        senderLabel: 'W7K2M9',
-        receivedAt: DateTime.now(),
-      );
-      await AlertsDb.insertIfNew(record);
-      await AlertsDb.setClaim(42, 'V4B2XY', DateTime.now());
-      await AlertsDb.insertIfNew(record);
+    test(
+      're-hearing an alert never clobbers a claim already made on it',
+      () async {
+        // The case this protects: neighbours re-air the same alert for its
+        // whole airtime, so insertIfNew runs repeatedly for one incident. If
+        // it overwrote, a volunteer's claim would be wiped seconds after they
+        // made it and the alert would look unanswered again.
+        final record = AlertRecord(
+          msgId: 42,
+          category: kCategoryLostPerson,
+          senderLabel: 'W7K2M9',
+          receivedAt: DateTime.now(),
+        );
+        await AlertsDb.insertIfNew(record);
+        await AlertsDb.setClaim(42, 'V4B2XY', DateTime.now());
+        await AlertsDb.insertIfNew(record);
 
-      final stored = (await AlertsDb.all()).firstWhere((a) => a.msgId == 42);
-      expect(stored.claimedBy, 'V4B2XY');
-    });
+        final stored = (await AlertsDb.all()).firstWhere((a) => a.msgId == 42);
+        expect(stored.claimedBy, 'V4B2XY');
+      },
+    );
 
     test('the first claim heard wins over a later one', () async {
-      await AlertsDb.insertIfNew(AlertRecord(
-        msgId: 7,
-        category: kCategorySos,
-        senderLabel: 'W7K2M9',
-        receivedAt: DateTime.now(),
-      ));
+      await AlertsDb.insertIfNew(
+        AlertRecord(
+          msgId: 7,
+          category: kCategorySos,
+          senderLabel: 'W7K2M9',
+          receivedAt: DateTime.now(),
+        ),
+      );
       await AlertsDb.setClaim(7, 'V1AAAA', DateTime.now());
       await AlertsDb.setClaim(7, 'V2BBBB', DateTime.now());
 
@@ -168,33 +235,42 @@ void main() {
       expect(stored.claimedBy, 'V1AAAA');
     });
 
-    test('a detail packet arriving after its alert fills in who to look for', () async {
-      await AlertsDb.insertIfNew(AlertRecord(
-        msgId: 99,
-        category: kCategoryLostPerson,
-        senderLabel: 'W7K2M9',
-        receivedAt: DateTime.now(),
-      ));
-      await AlertsDb.setLostDetail(99, 'Aarav', '8');
-      await AlertsDb.setLocation(99, 17.679076, 75.323997);
+    test(
+      'a detail packet arriving after its alert fills in who to look for',
+      () async {
+        await AlertsDb.insertIfNew(
+          AlertRecord(
+            msgId: 99,
+            category: kCategoryLostPerson,
+            senderLabel: 'W7K2M9',
+            receivedAt: DateTime.now(),
+          ),
+        );
+        await AlertsDb.setLostDetail(99, 'Aarav', '8');
+        await AlertsDb.setLocation(99, 17.679076, 75.323997);
 
-      final stored = (await AlertsDb.all()).firstWhere((a) => a.msgId == 99);
-      expect(stored.lostSummary, 'Aarav, age 8');
-      expect(stored.hasLocation, isTrue);
-      expect(stored.latitude, closeTo(17.679076, 1e-9));
-    });
+        final stored = (await AlertsDb.all()).firstWhere((a) => a.msgId == 99);
+        expect(stored.lostSummary, 'Aarav, age 8');
+        expect(stored.hasLocation, isTrue);
+        expect(stored.latitude, closeTo(17.679076, 1e-9));
+      },
+    );
   });
 
   group('help_points table', () {
-    HelpPointRecord record(int msgId, {int helpType = kStationMedical, bool mine = false}) => HelpPointRecord(
-          msgId: msgId,
-          helpType: helpType,
-          senderLabel: 'V7K2M9',
-          senderName: 'Sunita',
-          receivedAt: DateTime.now(),
-          expiresAt: DateTime.now().add(const Duration(hours: 2)),
-          mine: mine,
-        );
+    HelpPointRecord record(
+      int msgId, {
+      int helpType = kStationMedical,
+      bool mine = false,
+    }) => HelpPointRecord(
+      msgId: msgId,
+      helpType: helpType,
+      senderLabel: 'V7K2M9',
+      senderName: 'Sunita',
+      receivedAt: DateTime.now(),
+      expiresAt: DateTime.now().add(const Duration(hours: 2)),
+      mine: mine,
+    );
 
     test('a fresh database accepts a help point announcement', () async {
       await HelpPointsDb.insertIfNew(record(1));
@@ -204,27 +280,42 @@ void main() {
       expect(stored.isActive, isTrue);
     });
 
-    test('closing a help point sets status and closedBy, and it drops out of active', () async {
-      await HelpPointsDb.insertIfNew(record(2));
-      await HelpPointsDb.setStatus(2, kHelpStatusClosed, closedBy: 'V7K2M9', closedAt: DateTime.now());
+    test(
+      'closing a help point sets status and closedBy, and it drops out of active',
+      () async {
+        await HelpPointsDb.insertIfNew(record(2));
+        await HelpPointsDb.setStatus(
+          2,
+          kHelpStatusClosed,
+          closedBy: 'V7K2M9',
+          closedAt: DateTime.now(),
+        );
 
-      final stored = (await HelpPointsDb.all()).firstWhere((h) => h.msgId == 2);
-      expect(stored.isClosed, isTrue);
-      expect(stored.closedBy, 'V7K2M9');
-      expect(stored.isActive, isFalse);
-    });
+        final stored = (await HelpPointsDb.all()).firstWhere(
+          (h) => h.msgId == 2,
+        );
+        expect(stored.isClosed, isTrue);
+        expect(stored.closedBy, 'V7K2M9');
+        expect(stored.isActive, isFalse);
+      },
+    );
 
-    test('re-hearing the same announcement never clobbers a status already set', () async {
-      // Same reasoning as the alerts-table test above: the sender re-airs
-      // the announcement for its whole airtime, so insertIfNew runs
-      // repeatedly for the same help point.
-      await HelpPointsDb.insertIfNew(record(3));
-      await HelpPointsDb.setStatus(3, kHelpStatusLimited);
-      await HelpPointsDb.insertIfNew(record(3));
+    test(
+      're-hearing the same announcement never clobbers a status already set',
+      () async {
+        // Same reasoning as the alerts-table test above: the sender re-airs
+        // the announcement for its whole airtime, so insertIfNew runs
+        // repeatedly for the same help point.
+        await HelpPointsDb.insertIfNew(record(3));
+        await HelpPointsDb.setStatus(3, kHelpStatusLimited);
+        await HelpPointsDb.insertIfNew(record(3));
 
-      final stored = (await HelpPointsDb.all()).firstWhere((h) => h.msgId == 3);
-      expect(stored.isLimited, isTrue);
-    });
+        final stored = (await HelpPointsDb.all()).firstWhere(
+          (h) => h.msgId == 3,
+        );
+        expect(stored.isLimited, isTrue);
+      },
+    );
 
     test('"I\'m going there" persists locally', () async {
       await HelpPointsDb.insertIfNew(record(4));

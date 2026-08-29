@@ -62,7 +62,9 @@ const Duration kTextAirtime = Duration(seconds: 40);
 // a genuinely reachable phone gets another chance well inside this window.
 const Duration kTextAssemblyExpiry = Duration(seconds: 90);
 const Duration kAlertAirtime = Duration(seconds: 60); // an alert we originated
-const Duration kRelayAirtime = Duration(seconds: 45); // an alert we're passing on
+const Duration kRelayAirtime = Duration(
+  seconds: 45,
+); // an alert we're passing on
 
 // Airtime priorities. Only the top live tier gets the radio (see
 // _serviceAdvertSlotInner), so these are a strict pecking order, not
@@ -88,9 +90,15 @@ const Duration kResponseAirtime = Duration(seconds: 45);
 // must never outrank an actual SOS. It shares the alert priority tier for
 // that reason — same relationship kResponseAirtime has to alerts above.
 const int kPriorityHelpPoint = kPriorityAlert;
-const Duration kHelpPointAirtime = Duration(seconds: 60); // a help point we announced
-const Duration kHelpPointRelayAirtime = Duration(seconds: 45); // one we're passing on
-const Duration kHelpPointStatusAirtime = Duration(seconds: 45); // a close/status update
+const Duration kHelpPointAirtime = Duration(
+  seconds: 60,
+); // a help point we announced
+const Duration kHelpPointRelayAirtime = Duration(
+  seconds: 45,
+); // one we're passing on
+const Duration kHelpPointStatusAirtime = Duration(
+  seconds: 45,
+); // a close/status update
 
 /// One payload this phone is currently putting on the air, and until when.
 ///
@@ -102,6 +110,7 @@ class _Broadcast {
   final Uint8List bytes;
   final DateTime expiresAt;
   final int priority;
+
   /// How long this payload holds the radio before the rotation moves on.
   /// Text uses a shorter slot than alerts so a fragmented message arrives
   /// in seconds rather than half a minute — see kTextSlot.
@@ -126,7 +135,14 @@ class _PresenceEntry {
   final String name;
   final DateTime lastHeard;
   final int station;
-  _PresenceEntry(this.groupTag, this.name, this.lastHeard, this.station);
+  final bool isDindiLead;
+  _PresenceEntry(
+    this.groupTag,
+    this.name,
+    this.lastHeard,
+    this.station,
+    this.isDindiLead,
+  );
 }
 
 /// A volunteer's phone heard nearby that is staffing a help point.
@@ -179,6 +195,7 @@ class MeshService extends ChangeNotifier {
   String _myName = '';
   UserRole _myRole = UserRole.volunteer;
   int _myStation = kStationNone;
+  bool _amDindiLead = false;
 
   /// This phone's own Mesh ID, as it appears in every packet it sends.
   String get myMeshId => deviceLabel;
@@ -186,6 +203,10 @@ class MeshService extends ChangeNotifier {
   /// Which help point this phone is announcing, or [kStationNone].
   int get myStation => _myStation;
   bool get onDuty => _myStation != kStationNone;
+
+  /// Whether this phone has declared itself the Dindi Lead of its own
+  /// Dindi — see UserProfile.isDindiLead for the trust model.
+  bool get amDindiLead => _amDindiLead;
 
   final List<LogEntry> log = [];
   int seenCount = 0;
@@ -210,7 +231,8 @@ class MeshService extends ChangeNotifier {
   final List<_Broadcast> _broadcasts = [];
   int _slotCursor = 0;
   bool _servicingSlot = false;
-  Duration? _advertPeriod; // cadence the rotation ticker is currently running at
+  Duration?
+  _advertPeriod; // cadence the rotation ticker is currently running at
   DateTime? _lastServiceRestart;
   int _serviceRestarts = 0;
   List<int>? _onAir; // payload the radio is advertising right now, if any
@@ -231,7 +253,8 @@ class MeshService extends ChangeNotifier {
       alerts.where((a) => !a.isResolved && !a.mine).toList()..sort(_byTriage);
 
   /// The whole queue in triage order, resolved ones sunk to the bottom.
-  List<AlertRecord> get triagedAlerts => List<AlertRecord>.from(alerts)..sort(_byTriage);
+  List<AlertRecord> get triagedAlerts =>
+      List<AlertRecord>.from(alerts)..sort(_byTriage);
 
   int get unclaimedCount => alerts.where((a) => a.isOpen && !a.mine).length;
 
@@ -269,12 +292,14 @@ class MeshService extends ChangeNotifier {
     _presence.forEach((meshId, entry) {
       if (entry.station == kStationNone) return;
       if (entry.lastHeard.isBefore(cutoff)) return;
-      points.add(HelpPoint(
-        meshId: meshId,
-        name: entry.name,
-        station: entry.station,
-        lastHeard: entry.lastHeard,
-      ));
+      points.add(
+        HelpPoint(
+          meshId: meshId,
+          name: entry.name,
+          station: entry.station,
+          lastHeard: entry.lastHeard,
+        ),
+      );
     });
     points.sort((a, b) => b.lastHeard.compareTo(a.lastHeard));
     return points;
@@ -367,10 +392,61 @@ class MeshService extends ChangeNotifier {
   List<String> get dindiMemberNames {
     final cutoff = DateTime.now().subtract(kPresenceExpiry);
     return _presence.entries
-        .where((e) => e.value.groupTag == _myGroupTag && e.value.lastHeard.isAfter(cutoff))
+        .where(
+          (e) =>
+              e.value.groupTag == _myGroupTag &&
+              e.value.lastHeard.isAfter(cutoff),
+        )
         .map((e) => e.value.name.isEmpty ? e.key : e.value.name)
         .toList();
   }
+
+  /// The Mesh ID of this Dindi's Lead, if one is known — either this phone
+  /// itself, or a Lead heard recently via presence. Null covers two
+  /// legitimate edge cases the same way: no Lead has been designated for
+  /// this Dindi, or the Lead is currently out of range — SOS still reaches
+  /// Volunteers normally either way (see MeshService.dindiEmergencies and
+  /// the routing note in models.dart).
+  String? get dindiLeadMeshId {
+    if (_amDindiLead) return deviceLabel;
+    final cutoff = DateTime.now().subtract(kPresenceExpiry);
+    for (final entry in _presence.entries) {
+      if (entry.value.groupTag == _myGroupTag &&
+          entry.value.isDindiLead &&
+          entry.value.lastHeard.isAfter(cutoff)) {
+        return entry.key;
+      }
+    }
+    return null;
+  }
+
+  /// The Lead's first name, when known — falls back to their Mesh ID, same
+  /// as every other name lookup in this file.
+  String? get dindiLeadName {
+    final id = dindiLeadMeshId;
+    if (id == null) return null;
+    if (id == deviceLabel) return _myName.isEmpty ? id : _myName;
+    return nameFor(id) ?? id;
+  }
+
+  /// How a responder should be named on screen — "Sunita · Volunteer" /
+  /// "Rahul · Dindi Lead" — see responderRoleLabel() in models.dart for the
+  /// pure logic this just supplies presence data to.
+  String responderRoleLabelFor(String meshId) => responderRoleLabel(
+    meshId,
+    isDindiLead: meshId == deviceLabel
+        ? _amDindiLead
+        : (_presence[meshId]?.isDindiLead ?? false),
+  );
+
+  /// Open SOS alerts from this phone's own Dindi — a Dindi Lead's
+  /// "DINDI EMERGENCIES" queue. See isDindiEmergency() in models.dart for
+  /// the filter itself; this just applies it and sorts the way the
+  /// volunteer queue does (unclaimed SOS first, oldest first — see
+  /// _byTriage).
+  List<AlertRecord> get dindiEmergencies =>
+      alerts.where((a) => isDindiEmergency(a, _myGroupTag)).toList()
+        ..sort(_byTriage);
 
   Duration get cooldownRemaining {
     if (_lastSendAt == null) return Duration.zero;
@@ -421,11 +497,31 @@ class MeshService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Declares (or un-declares) this phone as its Dindi's Lead. Takes effect
+  /// on the next presence beacon, re-aired immediately — same reasoning as
+  /// [setStation]. Self-declared and unauthenticated: see the note on
+  /// UserProfile.isDindiLead.
+  void setDindiLead(bool value) {
+    if (_amDindiLead == value) return;
+    _amDindiLead = value;
+    appendLog(
+      value
+          ? 'You are now the Dindi Lead — SOS from your Dindi will be shown here as Dindi Emergencies'
+          : 'No longer the Dindi Lead',
+      'Sent',
+    );
+    _broadcastPresence();
+    notifyListeners();
+  }
+
   /// Puts one HELP_POINT announcement on the air and files it into
   /// [helpPoints] as our own. Public entry point is [setStation] — this is
   /// also what re-arms the announcement at bootstrap for a volunteer whose
   /// duty state survived an app restart (see bootstrap()).
-  Future<void> _announceHelpPoint(int helpType, {int status = kHelpStatusOpen}) async {
+  Future<void> _announceHelpPoint(
+    int helpType, {
+    int status = kHelpStatusOpen,
+  }) async {
     final msgId = Random().nextInt(0xFFFFFFFF);
     final packet = HelpPointPacket(
       ttl: kDefaultTtl,
@@ -433,16 +529,27 @@ class MeshService extends ChangeNotifier {
       helpType: helpType,
       status: status,
       senderLabel: deviceLabel,
-      expiresInMinutesDiv5: (helpPointDefaultExpiry(helpType).inMinutes ~/ 5).clamp(1, 255),
+      expiresInMinutesDiv5: (helpPointDefaultExpiry(helpType).inMinutes ~/ 5)
+          .clamp(1, 255),
     );
     await SeenMessagesDb.markSeenRaw(
-      msgId, category: kHelpPointPacketType, senderLabel: deviceLabel, ttl: kDefaultTtl,
+      msgId,
+      category: kHelpPointPacketType,
+      senderLabel: deviceLabel,
+      ttl: kDefaultTtl,
     );
 
     if (peripheralSupported && bluetoothOn) {
-      _queueBroadcast('helppoint:$msgId', packet.encode(), kHelpPointAirtime,
-          priority: kPriorityHelpPoint);
-      appendLog('Announced ${stationLabel(helpType)} help point — visible to nearby WariMesh users', 'Sent');
+      _queueBroadcast(
+        'helppoint:$msgId',
+        packet.encode(),
+        kHelpPointAirtime,
+        priority: kPriorityHelpPoint,
+      );
+      appendLog(
+        'Announced ${stationLabel(helpType)} help point — visible to nearby WariMesh users',
+        'Sent',
+      );
     } else {
       appendLog(
         'On duty as ${stationLabel(helpType)}, but this phone cannot broadcast — nobody will see it',
@@ -478,8 +585,12 @@ class MeshService extends ChangeNotifier {
     _cancelBroadcast('helppoint:$msgId');
     unawaited(() async {
       try {
-        await HelpPointsDb.setStatus(msgId, kHelpStatusClosed,
-            closedBy: deviceLabel, closedAt: DateTime.now());
+        await HelpPointsDb.setStatus(
+          msgId,
+          kHelpStatusClosed,
+          closedBy: deviceLabel,
+          closedAt: DateTime.now(),
+        );
         await loadHelpPoints();
       } catch (e) {
         appendLog('Could not close this help point: $e', 'Warning');
@@ -487,14 +598,23 @@ class MeshService extends ChangeNotifier {
     }());
 
     final packet = HelpPointStatusPacket(
-      msgId: msgId, updaterMeshId: deviceLabel, status: kHelpStatusClosed,
+      msgId: msgId,
+      updaterMeshId: deviceLabel,
+      status: kHelpStatusClosed,
     );
     if (peripheralSupported && bluetoothOn) {
-      _queueBroadcast('hpstatus:$msgId', packet.encode(), kHelpPointStatusAirtime,
-          priority: kPriorityHelpPoint);
+      _queueBroadcast(
+        'hpstatus:$msgId',
+        packet.encode(),
+        kHelpPointStatusAirtime,
+        priority: kPriorityHelpPoint,
+      );
       appendLog('Help point closed — nearby phones told', 'Sent');
     } else {
-      appendLog('Help point closed on this phone only — cannot broadcast', 'Warning');
+      appendLog(
+        'Help point closed on this phone only — cannot broadcast',
+        'Warning',
+      );
     }
   }
 
@@ -528,7 +648,11 @@ class MeshService extends ChangeNotifier {
     deviceLabel = profile.meshId;
     _myGroupTag = profile.dindiTag;
     _myRole = profile.role;
-    _myStation = profile.role == UserRole.volunteer ? profile.station : kStationNone;
+    _myStation = profile.role == UserRole.volunteer
+        ? profile.station
+        : kStationNone;
+    // Same reasoning as station above: only a warkari can lead a Dindi.
+    _amDindiLead = profile.role == UserRole.warkari && profile.isDindiLead;
     _myName = profile.name.trim().split(RegExp(r'\s+')).first;
 
     // Each step is independently guarded: one subsystem failing (DB won't
@@ -555,7 +679,10 @@ class MeshService extends ChangeNotifier {
       await loadAlerts();
       await loadHelpPoints();
     } catch (e) {
-      appendLog('Local database unavailable — activity won\'t persist: $e', 'Warning');
+      appendLog(
+        'Local database unavailable — activity won\'t persist: $e',
+        'Warning',
+      );
     }
 
     try {
@@ -616,7 +743,10 @@ class MeshService extends ChangeNotifier {
         await FlutterBluePlus.turnOn();
       }
     } catch (e) {
-      appendLog('Could not enable Bluetooth automatically — turn it on manually: $e', 'Warning');
+      appendLog(
+        'Could not enable Bluetooth automatically — turn it on manually: $e',
+        'Warning',
+      );
     }
 
     _watchAdapterState();
@@ -684,7 +814,8 @@ class MeshService extends ChangeNotifier {
   bool _mayRestartService() {
     if (_serviceRestarts >= 5) return false;
     final last = _lastServiceRestart;
-    if (last != null && DateTime.now().difference(last) < const Duration(minutes: 1)) {
+    if (last != null &&
+        DateTime.now().difference(last) < const Duration(minutes: 1)) {
       return false;
     }
     _lastServiceRestart = DateTime.now();
@@ -704,7 +835,8 @@ class MeshService extends ChangeNotifier {
     _lifecycle = AppLifecycleListener(
       onStateChange: (state) {
         appendLog('App lifecycle → ${state.name}', 'System');
-        if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+        if (state == AppLifecycleState.paused ||
+            state == AppLifecycleState.hidden) {
           // Re-assert both as we go into the background rather than waiting
           // up to 20s for the next watchdog tick — this transition is
           // exactly when Android tears things down.
@@ -716,7 +848,8 @@ class MeshService extends ChangeNotifier {
 
   Future<void> _reassertBackgroundReceiving() async {
     try {
-      if (!await FlutterForegroundTask.isRunningService && _mayRestartService()) {
+      if (!await FlutterForegroundTask.isRunningService &&
+          _mayRestartService()) {
         await toggleBackgroundService(true);
       }
       if (bluetoothOn && !FlutterBluePlus.isScanningNow) {
@@ -770,7 +903,8 @@ class MeshService extends ChangeNotifier {
   Future<void> _requestBatteryExemption() async {
     try {
       if (await FlutterForegroundTask.isIgnoringBatteryOptimizations) return;
-      final granted = await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+      final granted =
+          await FlutterForegroundTask.requestIgnoreBatteryOptimization();
       if (!granted) {
         appendLog(
           'Battery optimisation is still on — Android may stop alerts arriving once the screen locks',
@@ -818,9 +952,13 @@ class MeshService extends ChangeNotifier {
       // reported the relay as dead while it was actually running, and left
       // the watchdog trying to restart a healthy service every 20 seconds.
       final alreadyRunning =
-          result is ServiceRequestFailure && result.error is ServiceAlreadyStartedException;
+          result is ServiceRequestFailure &&
+          result.error is ServiceAlreadyStartedException;
       if (result is ServiceRequestFailure && !alreadyRunning) {
-        appendLog('Background service failed to start: ${result.error}', 'Warning');
+        appendLog(
+          'Background service failed to start: ${result.error}',
+          'Warning',
+        );
         backgroundServiceEnabled = false;
         notifyListeners();
         return;
@@ -836,7 +974,7 @@ class MeshService extends ChangeNotifier {
         backgroundServiceEnabled
             ? 'Background relay is running — this phone can receive alerts with the screen off'
             : 'Background relay did NOT start — Android will freeze this app when the screen goes off, '
-                'and alerts will not arrive. Check battery settings for WariMesh.',
+                  'and alerts will not arrive. Check battery settings for WariMesh.',
         backgroundServiceEnabled ? 'Sent' : 'Warning',
       );
     } else {
@@ -872,12 +1010,16 @@ class MeshService extends ChangeNotifier {
   /// alert was just sent.
   void _startPresenceBroadcast() {
     _presenceTicker?.cancel();
-    _presenceTicker = Timer.periodic(kPresenceInterval, (_) => _broadcastPresence());
+    _presenceTicker = Timer.periodic(
+      kPresenceInterval,
+      (_) => _broadcastPresence(),
+    );
     _broadcastPresence(); // don't wait a full interval for the first beacon
   }
 
   void _broadcastPresence() {
-    if (!peripheralSupported || !bluetoothOn) return; // no real radio to send on — nothing to do
+    if (!peripheralSupported || !bluetoothOn)
+      return; // no real radio to send on — nothing to do
     // Lowest priority: a headcount beacon may never cost an alert airtime.
     // Its airtime runs slightly past the next tick so the beacon stays in
     // the rotation continuously rather than blinking out between ticks.
@@ -886,8 +1028,14 @@ class MeshService extends ChangeNotifier {
       groupTag: _myGroupTag,
       name: _myName,
       station: _myStation,
+      isDindiLead: _amDindiLead,
     );
-    _queueBroadcast('presence', packet.encode(), kPresenceInterval * 2, priority: 0);
+    _queueBroadcast(
+      'presence',
+      packet.encode(),
+      kPresenceInterval * 2,
+      priority: 0,
+    );
   }
 
   /// Registers [bytes] to be repeatedly put on the air for [airtime].
@@ -916,7 +1064,9 @@ class MeshService extends ChangeNotifier {
   }) {
     if (!peripheralSupported || !bluetoothOn) return;
     _broadcasts.removeWhere((b) => b.key == key);
-    _broadcasts.add(_Broadcast(key, bytes, DateTime.now().add(airtime), priority, slot));
+    _broadcasts.add(
+      _Broadcast(key, bytes, DateTime.now().add(airtime), priority, slot),
+    );
     _startAdvertLoop(slot);
     unawaited(_serviceAdvertSlot()); // don't make an SOS wait up to a full slot
   }
@@ -928,7 +1078,10 @@ class MeshService extends ChangeNotifier {
     if (_advertTicker != null && _advertPeriod == slot) return;
     _advertTicker?.cancel();
     _advertPeriod = slot;
-    _advertTicker = Timer.periodic(slot, (_) => unawaited(_serviceAdvertSlot()));
+    _advertTicker = Timer.periodic(
+      slot,
+      (_) => unawaited(_serviceAdvertSlot()),
+    );
   }
 
   /// Gives the radio to one registered broadcast for this slot, dropping
@@ -1006,7 +1159,9 @@ class MeshService extends ChangeNotifier {
       if (data == null || data.isEmpty) continue;
       // Raw sighting, before any decode/dedup — the ground truth for "is
       // this phone's radio hearing the other phone at all?".
-      debugPrint('WariMesh[RAW] rssi=${r.rssi} type=${data[0]} len=${data.length}');
+      debugPrint(
+        'WariMesh[RAW] rssi=${r.rssi} type=${data[0]} len=${data.length}',
+      );
 
       // Two completely separate wire formats share the manufacturer-data
       // slot — the byte-0 packetType says which. See the note on
@@ -1074,8 +1229,13 @@ class MeshService extends ChangeNotifier {
 
   void _handlePresence(PresencePacket packet) {
     if (packet.meshId == deviceLabel) return; // our own beacon bouncing back
-    _presence[packet.meshId] =
-        _PresenceEntry(packet.groupTag, packet.name, DateTime.now(), packet.station);
+    _presence[packet.meshId] = _PresenceEntry(
+      packet.groupTag,
+      packet.name,
+      DateTime.now(),
+      packet.station,
+      packet.isDindiLead,
+    );
     notifyListeners();
   }
 
@@ -1113,8 +1273,18 @@ class MeshService extends ChangeNotifier {
     for (final a in alerts) {
       final lat = a.latitude, lon = a.longitude;
       if (lat == null || lon == null) continue;
-      a.distanceMetres = LocationService.distanceBetween(me.latitude, me.longitude, lat, lon);
-      a.bearingDegrees = LocationService.bearingBetween(me.latitude, me.longitude, lat, lon);
+      a.distanceMetres = LocationService.distanceBetween(
+        me.latitude,
+        me.longitude,
+        lat,
+        lon,
+      );
+      a.bearingDegrees = LocationService.bearingBetween(
+        me.latitude,
+        me.longitude,
+        lat,
+        lon,
+      );
     }
   }
 
@@ -1169,16 +1339,23 @@ class MeshService extends ChangeNotifier {
 
     final ack = AckPacket(msgId: alert.msgId, responderMeshId: deviceLabel);
     if (peripheralSupported && bluetoothOn) {
-      _queueBroadcast('ack:${alert.msgId}', ack.encode(), kResponseAirtime,
-          priority: kPriorityAlert);
-      appendLog('Responding to #${alert.msgId} — telling the sender help is coming', 'Sent');
+      _queueBroadcast(
+        'ack:${alert.msgId}',
+        ack.encode(),
+        kResponseAirtime,
+        priority: kPriorityAlert,
+      );
+      appendLog(
+        'Responding to #${alert.msgId} — telling the sender help is coming',
+        'Sent',
+      );
     } else {
       // The claim still stands locally. It has to: a volunteer on a phone
       // that cannot advertise is still a volunteer walking towards someone,
       // and their own queue must reflect that even if nobody else hears it.
       appendLog(
         'Responding to #${alert.msgId} — but this phone cannot broadcast, '
-        'so the sender will not be told',
+            'so the sender will not be told',
         'Warning',
       );
     }
@@ -1186,7 +1363,10 @@ class MeshService extends ChangeNotifier {
 
   /// Closes an alert and broadcasts that it's closed, which is what stops
   /// the search — and, for a missing child, is the whole point of the app.
-  Future<void> resolveAlert(AlertRecord alert, {int reason = kResolveFound}) async {
+  Future<void> resolveAlert(
+    AlertRecord alert, {
+    int reason = kResolveFound,
+  }) async {
     final now = DateTime.now();
     try {
       await AlertsDb.setResolved(alert.msgId, deviceLabel, reason, now);
@@ -1209,14 +1389,21 @@ class MeshService extends ChangeNotifier {
       reason: reason,
     );
     if (peripheralSupported && bluetoothOn) {
-      _queueBroadcast('res:${alert.msgId}', packet.encode(), kResponseAirtime,
-          priority: kPriorityAlert);
+      _queueBroadcast(
+        'res:${alert.msgId}',
+        packet.encode(),
+        kResponseAirtime,
+        priority: kPriorityAlert,
+      );
       appendLog(
         '${resolveReasonLabel(reason)} — #${alert.msgId} closed and nearby phones told',
         'Sent',
       );
     } else {
-      appendLog('${resolveReasonLabel(reason)} — #${alert.msgId} closed on this phone only', 'Warning');
+      appendLog(
+        '${resolveReasonLabel(reason)} — #${alert.msgId} closed on this phone only',
+        'Warning',
+      );
     }
   }
 
@@ -1260,7 +1447,10 @@ class MeshService extends ChangeNotifier {
         await AlertsDb.setClaim(ack.msgId, ack.responderMeshId, DateTime.now());
         await loadAlerts();
       } catch (e) {
-        appendLog('Could not record the response to #${ack.msgId}: $e', 'Warning');
+        appendLog(
+          'Could not record the response to #${ack.msgId}: $e',
+          'Warning',
+        );
       }
 
       final who = nameFor(ack.responderMeshId) ?? ack.responderMeshId;
@@ -1289,7 +1479,11 @@ class MeshService extends ChangeNotifier {
     if (existing != null && !existing.isResolved) {
       try {
         await AlertsDb.setResolved(
-            res.msgId, res.resolverMeshId, res.reason, DateTime.now());
+          res.msgId,
+          res.resolverMeshId,
+          res.reason,
+          DateTime.now(),
+        );
         await loadAlerts();
       } catch (e) {
         appendLog('Could not close #${res.msgId}: $e', 'Warning');
@@ -1302,7 +1496,10 @@ class MeshService extends ChangeNotifier {
       _cancelBroadcast('loc:${res.msgId}');
 
       final who = nameFor(res.resolverMeshId) ?? res.resolverMeshId;
-      appendLog('${resolveReasonLabel(res.reason)}: #${res.msgId} closed by $who', 'Received');
+      appendLog(
+        '${resolveReasonLabel(res.reason)}: #${res.msgId} closed by $who',
+        'Received',
+      );
 
       // Pull the alert off the in-app overlay too — leaving a full-screen
       // "someone needs help" over a resolved alert is actively misleading.
@@ -1323,7 +1520,10 @@ class MeshService extends ChangeNotifier {
     final alreadySeen = await SeenMessagesDb.hasSeen(packet.msgId);
     if (alreadySeen) return; // dedup — also the loop-prevention mechanism
     await SeenMessagesDb.markSeenRaw(
-      packet.msgId, category: kHelpPointPacketType, senderLabel: packet.senderLabel, ttl: packet.ttl,
+      packet.msgId,
+      category: kHelpPointPacketType,
+      senderLabel: packet.senderLabel,
+      ttl: packet.ttl,
     );
 
     appendLog(
@@ -1332,31 +1532,44 @@ class MeshService extends ChangeNotifier {
     );
 
     try {
-      await HelpPointsDb.insertIfNew(HelpPointRecord(
-        msgId: packet.msgId,
-        helpType: packet.helpType,
-        senderLabel: packet.senderLabel,
-        senderName: nameFor(packet.senderLabel),
-        receivedAt: DateTime.now(),
-        expiresAt: DateTime.now().add(packet.expiryDuration),
-        hops: kDefaultTtl - packet.ttl,
-        mine: false,
-        status: packet.status,
-      ));
+      await HelpPointsDb.insertIfNew(
+        HelpPointRecord(
+          msgId: packet.msgId,
+          helpType: packet.helpType,
+          senderLabel: packet.senderLabel,
+          senderName: nameFor(packet.senderLabel),
+          receivedAt: DateTime.now(),
+          expiresAt: DateTime.now().add(packet.expiryDuration),
+          hops: kDefaultTtl - packet.ttl,
+          mine: false,
+          status: packet.status,
+        ),
+      );
       await loadHelpPoints();
     } catch (e) {
       appendLog('Could not file this help point: $e', 'Warning');
     }
 
     if (packet.ttl > 0) {
-      final jitterMs = 300 + Random().nextInt(501); // 300–800ms, same as alert relay
+      final jitterMs =
+          300 + Random().nextInt(501); // 300–800ms, same as alert relay
       await Future.delayed(Duration(milliseconds: jitterMs));
       final relayed = packet.relayed();
-      _queueBroadcast('helppoint:${relayed.msgId}', relayed.encode(), kHelpPointRelayAirtime,
-          priority: kPriorityHelpPoint);
-      appendLog('Relayed help point via $deviceLabel (TTL now ${relayed.ttl})', 'Relayed');
+      _queueBroadcast(
+        'helppoint:${relayed.msgId}',
+        relayed.encode(),
+        kHelpPointRelayAirtime,
+        priority: kPriorityHelpPoint,
+      );
+      appendLog(
+        'Relayed help point via $deviceLabel (TTL now ${relayed.ttl})',
+        'Relayed',
+      );
     } else {
-      appendLog('Final hop reached $deviceLabel — help point not relayed further', 'Final hop');
+      appendLog(
+        'Final hop reached $deviceLabel — help point not relayed further',
+        'Final hop',
+      );
     }
   }
 
@@ -1368,8 +1581,10 @@ class MeshService extends ChangeNotifier {
 
     try {
       await HelpPointsDb.setStatus(
-        packet.msgId, packet.status,
-        closedBy: packet.updaterMeshId, closedAt: DateTime.now(),
+        packet.msgId,
+        packet.status,
+        closedBy: packet.updaterMeshId,
+        closedAt: DateTime.now(),
       );
       await loadHelpPoints();
       appendLog(
@@ -1410,10 +1625,7 @@ class MeshService extends ChangeNotifier {
         }
       }());
     }
-    appendLog(
-      'Position received for alert #${loc.msgId}',
-      'Received',
-    );
+    appendLog('Position received for alert #${loc.msgId}', 'Received');
 
     // The alert and its position travel as separate packets that take turns
     // on the air, so the alert almost always lands first — meaning the
@@ -1468,12 +1680,20 @@ class MeshService extends ChangeNotifier {
     final me = location.lastKnown;
     if (me == null) return;
     alert.distanceMetres = LocationService.distanceBetween(
-      me.latitude, me.longitude, loc.latitude, loc.longitude);
+      me.latitude,
+      me.longitude,
+      loc.latitude,
+      loc.longitude,
+    );
     alert.bearingDegrees = LocationService.bearingBetween(
-      me.latitude, me.longitude, loc.latitude, loc.longitude);
+      me.latitude,
+      me.longitude,
+      loc.latitude,
+      loc.longitude,
+    );
   }
 
-    // ---------------------------------------------------------------------
+  // ---------------------------------------------------------------------
   // Text messages — Dindi chat and volunteer advisories.
   // ---------------------------------------------------------------------
 
@@ -1524,7 +1744,10 @@ class MeshService extends ChangeNotifier {
     await _storeMessage(message, countUnread: false);
 
     if (!peripheralSupported || !bluetoothOn) {
-      appendLog('Message saved but not broadcast — this phone cannot transmit right now', 'Warning');
+      appendLog(
+        'Message saved but not broadcast — this phone cannot transmit right now',
+        'Warning',
+      );
       return false;
     }
 
@@ -1532,8 +1755,8 @@ class MeshService extends ChangeNotifier {
     appendLog(
       announcement
           ? 'Advisory sent to everyone in range for '
-              '${(airtime ?? kTextAirtime).inMinutes < 1 ? '${(airtime ?? kTextAirtime).inSeconds}s' : '${(airtime ?? kTextAirtime).inMinutes} min'} '
-              '(${fragments.parts.length + 1} fragments)'
+                '${(airtime ?? kTextAirtime).inMinutes < 1 ? '${(airtime ?? kTextAirtime).inSeconds}s' : '${(airtime ?? kTextAirtime).inMinutes} min'} '
+                '(${fragments.parts.length + 1} fragments)'
           : 'Message sent to your Dindi (${fragments.parts.length + 1} fragments)',
       'Sent',
     );
@@ -1543,12 +1766,26 @@ class MeshService extends ChangeNotifier {
   /// Puts a whole message on the air. Every fragment shares the text tier,
   /// so they rotate among themselves and repeat for the full airtime —
   /// a receiver that misses fragment 3 on the first pass catches it later.
-  void _airText(TextHeadPacket head, List<TextPartPacket> parts, Duration airtime) {
-    _queueBroadcast('txt:${head.msgId}:0', head.encode(), airtime,
-        priority: kPriorityText, slot: kTextSlot);
+  void _airText(
+    TextHeadPacket head,
+    List<TextPartPacket> parts,
+    Duration airtime,
+  ) {
+    _queueBroadcast(
+      'txt:${head.msgId}:0',
+      head.encode(),
+      airtime,
+      priority: kPriorityText,
+      slot: kTextSlot,
+    );
     for (final part in parts) {
-      _queueBroadcast('txt:${head.msgId}:${part.index}', part.encode(), airtime,
-          priority: kPriorityText, slot: kTextSlot);
+      _queueBroadcast(
+        'txt:${head.msgId}:${part.index}',
+        part.encode(),
+        airtime,
+        priority: kPriorityText,
+        slot: kTextSlot,
+      );
     }
   }
 
@@ -1560,7 +1797,10 @@ class MeshService extends ChangeNotifier {
     _relayFragment('${head.msgId}:0', head.ttl, () => head.relayed().encode());
     if (_completedTextIds.contains(head.msgId)) return;
 
-    final assembly = _assembling.putIfAbsent(head.msgId, () => _TextAssembly(head.msgId));
+    final assembly = _assembling.putIfAbsent(
+      head.msgId,
+      () => _TextAssembly(head.msgId),
+    );
     assembly.head = head;
     assembly.total = head.fragTotal;
     assembly.chunks[0] = head.chunk;
@@ -1570,10 +1810,17 @@ class MeshService extends ChangeNotifier {
   Future<void> _handleTextPart(TextPartPacket part) async {
     // A part can arrive before its head — we don't know the sender or the
     // fragment count yet, so hold it until the head turns up.
-    _relayFragment('${part.msgId}:${part.index}', part.ttl, () => part.relayed().encode());
+    _relayFragment(
+      '${part.msgId}:${part.index}',
+      part.ttl,
+      () => part.relayed().encode(),
+    );
     if (_completedTextIds.contains(part.msgId)) return;
 
-    final assembly = _assembling.putIfAbsent(part.msgId, () => _TextAssembly(part.msgId));
+    final assembly = _assembling.putIfAbsent(
+      part.msgId,
+      () => _TextAssembly(part.msgId),
+    );
     assembly.chunks[part.index] = part.chunk;
     await _completeIfWhole(assembly);
   }
@@ -1587,14 +1834,22 @@ class MeshService extends ChangeNotifier {
     if (_relayedFragments.length > 500) {
       _relayedFragments.remove(_relayedFragments.first);
     }
-    _queueBroadcast('txt:$key', encode(), kTextAirtime,
-        priority: kPriorityText, slot: kTextSlot);
+    _queueBroadcast(
+      'txt:$key',
+      encode(),
+      kTextAirtime,
+      priority: kPriorityText,
+      slot: kTextSlot,
+    );
   }
 
   /// Joins the fragments once they are all present and files the result.
   Future<void> _completeIfWhole(_TextAssembly assembly) async {
-    _assembling.removeWhere((_, a) =>
-        DateTime.now().difference(a.startedAt) > kTextAssemblyExpiry && a != assembly);
+    _assembling.removeWhere(
+      (_, a) =>
+          DateTime.now().difference(a.startedAt) > kTextAssemblyExpiry &&
+          a != assembly,
+    );
 
     final head = assembly.head;
     final total = assembly.total;
@@ -1603,7 +1858,9 @@ class MeshService extends ChangeNotifier {
       if (!assembly.chunks.containsKey(i)) return; // still missing a fragment
     }
 
-    final body = [for (var i = 0; i < total; i++) assembly.chunks[i]!].join().trimRight();
+    final body = [
+      for (var i = 0; i < total; i++) assembly.chunks[i]!,
+    ].join().trimRight();
     _assembling.remove(assembly.msgId);
 
     // Claim it before filing so a fragment landing mid-await can't produce
@@ -1631,7 +1888,10 @@ class MeshService extends ChangeNotifier {
   /// Files a message, in SQLite and in memory. Silently does nothing if the
   /// msgId is already known — the same message reaches us repeatedly as
   /// neighbours relay it, and a conversation must not fill with duplicates.
-  Future<void> _storeMessage(MeshTextMessage message, {required bool countUnread}) async {
+  Future<void> _storeMessage(
+    MeshTextMessage message, {
+    required bool countUnread,
+  }) async {
     if (messages.any((m) => m.msgId == message.msgId)) return;
 
     var isNew = true;
@@ -1666,7 +1926,9 @@ class MeshService extends ChangeNotifier {
     }
 
     appendLog(
-      message.outgoing ? 'You: ${message.body}' : '${message.displayName}: ${message.body}',
+      message.outgoing
+          ? 'You: ${message.body}'
+          : '${message.displayName}: ${message.body}',
       message.isAnnouncement ? 'Advisory' : 'Received',
     );
     notifyListeners();
@@ -1715,7 +1977,8 @@ class MeshService extends ChangeNotifier {
   }
 
   Future<void> _handleReceivedPacket(MeshPacket packet) async {
-    if (packet.senderLabel == deviceLabel) return; // ignore our own advertisement bouncing back
+    if (packet.senderLabel == deviceLabel)
+      return; // ignore our own advertisement bouncing back
 
     final alreadySeen = await SeenMessagesDb.hasSeen(packet.msgId);
     if (alreadySeen) return; // dedup — also the loop-prevention mechanism
@@ -1738,11 +2001,12 @@ class MeshService extends ChangeNotifier {
     // completely silent for a real SOS from someone standing next to
     // them. Whoever is nearest is who can help; group membership must not
     // decide whether they're told.
-    final prominent = packet.category == kCategorySos || isMyDindi || isResponder;
+    final prominent =
+        packet.category == kCategorySos || isMyDindi || isResponder;
 
     appendLog(
       'Received ${categoryLabel(packet.category)} from ${packet.senderLabel}'
-      '${isMyDindi ? ' (your Dindi)' : ''} (TTL ${packet.ttl})',
+          '${isMyDindi ? ' (your Dindi)' : ''} (TTL ${packet.ttl})',
       'Received',
     );
     if (prominent) {
@@ -1793,23 +2057,41 @@ class MeshService extends ChangeNotifier {
       // phone we're relaying to may well have its screen off, and a
       // single burst is exactly what it would miss. This is also what
       // lets someone who walks into range ten seconds late still hear it.
-      _queueBroadcast('alert:${relayed.msgId}', relayed.encode(), kRelayAirtime, priority: 2);
+      _queueBroadcast(
+        'alert:${relayed.msgId}',
+        relayed.encode(),
+        kRelayAirtime,
+        priority: 2,
+      );
       final loc = _alertLocations[relayed.msgId];
       if (loc != null) {
         // The position has to travel as far as the alert does, or a phone
         // two hops out learns someone needs help but not where.
-        _queueBroadcast('loc:${relayed.msgId}', loc.encode(), kRelayAirtime, priority: 2);
+        _queueBroadcast(
+          'loc:${relayed.msgId}',
+          loc.encode(),
+          kRelayAirtime,
+          priority: 2,
+        );
       }
       final detail = _lostDetails[relayed.msgId];
       if (detail != null) {
-          // Same priority as the alert, not lower: under the top-tier rule
+        // Same priority as the alert, not lower: under the top-tier rule
         // in _serviceAdvertSlotInner a lower priority would never air at
         // all, and an alert without its name is barely actionable.
-        _queueBroadcast('detail:${relayed.msgId}', detail.encode(), kRelayAirtime, priority: 2);
+        _queueBroadcast(
+          'detail:${relayed.msgId}',
+          detail.encode(),
+          kRelayAirtime,
+          priority: 2,
+        );
       }
       appendLog('Relayed via $deviceLabel (TTL now ${relayed.ttl})', 'Relayed');
     } else {
-      appendLog('Final hop reached $deviceLabel — not relayed further', 'Final hop');
+      appendLog(
+        'Final hop reached $deviceLabel — not relayed further',
+        'Final hop',
+      );
     }
   }
 
@@ -1836,7 +2118,10 @@ class MeshService extends ChangeNotifier {
         // note above kAdvertSlot for why that lost screen-off receivers.
         timeout: 0,
       );
-      await _blePeripheral.start(advertiseData: data, advertiseSettings: settings);
+      await _blePeripheral.start(
+        advertiseData: data,
+        advertiseSettings: settings,
+      );
       return true;
     } catch (e) {
       appendLog('Advertise failed: $e', 'Warning');
@@ -1852,7 +2137,11 @@ class MeshService extends ChangeNotifier {
   /// For a Lost Person alert, pass [lostName]/[lostAge] — they're
   /// broadcast as a separate detail packet so receiving phones can show
   /// who to look for rather than a nameless "someone is missing".
-  Future<MeshPacket?> sendAlert(int category, {String? lostName, String? lostAge}) async {
+  Future<MeshPacket?> sendAlert(
+    int category, {
+    String? lostName,
+    String? lostAge,
+  }) async {
     if (onCooldown) {
       appendLog(
         'Send blocked — wait ${cooldownRemaining.inSeconds + 1}s (10s rate limit)',
@@ -1879,12 +2168,22 @@ class MeshService extends ChangeNotifier {
     if (peripheralSupported && bluetoothOn) {
       final detail = (lostName == null || lostName.isEmpty)
           ? null
-          : LostPersonDetailPacket(msgId: packet.msgId, name: lostName, age: lostAge ?? '');
+          : LostPersonDetailPacket(
+              msgId: packet.msgId,
+              name: lostName,
+              age: lostAge ?? '',
+            );
       _broadcastAlert(packet, detail);
     } else if (!peripheralSupported) {
-      appendLog('This device cannot advertise over real BLE — it can receive alerts but never send them', 'Warning');
+      appendLog(
+        'This device cannot advertise over real BLE — it can receive alerts but never send them',
+        'Warning',
+      );
     } else if (!bluetoothOn) {
-      appendLog('Bluetooth is off — turn it on to broadcast over real BLE', 'Warning');
+      appendLog(
+        'Bluetooth is off — turn it on to broadcast over real BLE',
+        'Warning',
+      );
     }
 
     appendLog(
@@ -1896,8 +2195,11 @@ class MeshService extends ChangeNotifier {
     // ACK lands, and it's what lets this phone's own screen change from
     // "alert sent" to "someone is responding".
     if (lostName != null && lostName.isNotEmpty) {
-      _lostDetails[packet.msgId] =
-          LostPersonDetailPacket(msgId: packet.msgId, name: lostName, age: lostAge ?? '');
+      _lostDetails[packet.msgId] = LostPersonDetailPacket(
+        msgId: packet.msgId,
+        name: lostName,
+        age: lostAge ?? '',
+      );
     }
     await _recordAlert(packet, mine: true);
 
@@ -1911,9 +2213,19 @@ class MeshService extends ChangeNotifier {
   /// cutting the alert short and keeps the alert repeating long enough for
   /// a phone whose screen is off to actually catch it.
   void _broadcastAlert(MeshPacket packet, LostPersonDetailPacket? detail) {
-    _queueBroadcast('alert:${packet.msgId}', packet.encode(), kAlertAirtime, priority: 2);
+    _queueBroadcast(
+      'alert:${packet.msgId}',
+      packet.encode(),
+      kAlertAirtime,
+      priority: 2,
+    );
     if (detail != null) {
-      _queueBroadcast('detail:${packet.msgId}', detail.encode(), kAlertAirtime, priority: 2);
+      _queueBroadcast(
+        'detail:${packet.msgId}',
+        detail.encode(),
+        kAlertAirtime,
+        priority: 2,
+      );
     }
     _broadcastLocationFor(packet.msgId);
   }
@@ -1939,7 +2251,10 @@ class MeshService extends ChangeNotifier {
       _queueBroadcast('loc:$msgId', loc.encode(), kAlertAirtime, priority: 2);
       appendLog('Your position is going out with this alert', 'Sent');
     } else {
-      appendLog('No location fix yet — this alert goes out without a position', 'Warning');
+      appendLog(
+        'No location fix yet — this alert goes out without a position',
+        'Warning',
+      );
     }
 
     unawaited(() async {
@@ -1955,7 +2270,10 @@ class MeshService extends ChangeNotifier {
       // competing with it for airtime.
       _queueBroadcast('loc:$msgId', loc.encode(), kAlertAirtime, priority: 2);
       if (cached == null) {
-        appendLog('Got a location fix — now sending it with your alert', 'Sent');
+        appendLog(
+          'Got a location fix — now sending it with your alert',
+          'Sent',
+        );
       }
     }());
   }

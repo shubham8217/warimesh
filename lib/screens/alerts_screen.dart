@@ -53,20 +53,15 @@ class AlertsScreen extends StatelessWidget {
           ],
         ),
         if (queue.isEmpty)
-          const SliverFillRemaining(
-            hasScrollBody: false,
-            child: _EmptyQueue(),
-          )
+          const SliverFillRemaining(hasScrollBody: false, child: _EmptyQueue())
         else
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
             sliver: SliverList.separated(
               itemCount: queue.length,
               separatorBuilder: (_, _) => const SizedBox(height: 12),
-              itemBuilder: (context, i) => AlertQueueCard(
-                alert: queue[i],
-                mesh: mesh,
-              ),
+              itemBuilder: (context, i) =>
+                  AlertQueueCard(alert: queue[i], mesh: mesh),
             ),
           ),
       ],
@@ -85,7 +80,11 @@ class _EmptyQueue extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.check_circle_outline, size: 56, color: AppColors.relayed.withValues(alpha: 0.7)),
+          Icon(
+            Icons.check_circle_outline,
+            size: 56,
+            color: AppColors.relayed.withValues(alpha: 0.7),
+          ),
           const SizedBox(height: 16),
           const Text(
             'Nothing waiting',
@@ -99,7 +98,9 @@ class _EmptyQueue extends StatelessWidget {
             'No alerts have reached this phone. It stays listening in the '
             'background — anything that arrives lands here.',
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: muted),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: muted),
           ),
         ],
       ),
@@ -154,12 +155,17 @@ class AlertQueueCard extends StatelessWidget {
                       children: [
                         Text(
                           alert.lostSummary ?? alert.title,
-                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 17,
+                          ),
                         ),
                         const SizedBox(height: 2),
                         Text(
                           _sourceLine(),
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: muted),
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodySmall?.copyWith(color: muted),
                         ),
                       ],
                     ),
@@ -191,7 +197,9 @@ class AlertQueueCard extends StatelessWidget {
   /// several hops out.
   String _sourceLine() {
     final who = alert.senderName ?? alert.senderLabel;
-    final hops = alert.hops == 0 ? 'direct' : '${alert.hops} hop${alert.hops == 1 ? '' : 's'}';
+    final hops = alert.hops == 0
+        ? 'direct'
+        : '${alert.hops} hop${alert.hops == 1 ? '' : 's'}';
     return 'From $who · $hops · ${alert.ageLabel}';
   }
 }
@@ -203,10 +211,18 @@ class _StateChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (alert.isResolved) {
-      return const StatusPill(text: 'Closed', color: AppColors.relayed, icon: Icons.check);
+      return const StatusPill(
+        text: 'Closed',
+        color: AppColors.relayed,
+        icon: Icons.check,
+      );
     }
     if (alert.isClaimed) {
-      return const StatusPill(text: 'Taken', color: AppColors.warning, icon: Icons.directions_run);
+      return const StatusPill(
+        text: 'Taken',
+        color: AppColors.warning,
+        icon: Icons.directions_run,
+      );
     }
     return StatusPill(
       text: 'Open',
@@ -246,7 +262,12 @@ class _LocationLine extends StatelessWidget {
         Icon(icon, size: 16, color: muted),
         const SizedBox(width: 8),
         Expanded(
-          child: Text(text, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: muted)),
+          child: Text(
+            text,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: muted),
+          ),
         ),
       ],
     );
@@ -261,9 +282,19 @@ class _ClaimBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final mine = alert.claimedByMe(mesh.myMeshId);
-    final who = mine
-        ? 'You are responding'
-        : '${mesh.nameFor(alert.claimedBy!) ?? alert.claimedBy!} is responding';
+    // "Sunita · Volunteer is responding" / "Rahul · Dindi Lead is
+    // coordinating" — see responderRoleLabel()/responderVerb() in
+    // models.dart. A volunteer seeing a Lead coordinate their own Dindi's
+    // SOS (or vice versa) is exactly the cross-visibility this feature
+    // exists for.
+    final String who;
+    if (mine) {
+      who = 'You are responding';
+    } else {
+      final role = mesh.responderRoleLabelFor(alert.claimedBy!);
+      final name = mesh.nameFor(alert.claimedBy!) ?? alert.claimedBy!;
+      who = '$name · $role ${responderVerb(role)}';
+    }
     return _Banner(
       color: AppColors.warning,
       icon: Icons.directions_run,
@@ -280,11 +311,14 @@ class _ResolvedBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final by = alert.resolvedBy;
-    final who = by == mesh.myMeshId ? 'you' : (mesh.nameFor(by ?? '') ?? by ?? 'someone');
+    final who = by == mesh.myMeshId
+        ? 'you'
+        : (mesh.nameFor(by ?? '') ?? by ?? 'someone');
     return _Banner(
       color: AppColors.relayed,
       icon: Icons.check_circle,
-      text: '${resolveReasonLabel(alert.resolvedReason ?? kResolveHandled)} — closed by $who',
+      text:
+          '${resolveReasonLabel(alert.resolvedReason ?? kResolveHandled)} — closed by $who',
     );
   }
 }
@@ -310,7 +344,11 @@ class _Banner extends StatelessWidget {
           Expanded(
             child: Text(
               text,
-              style: TextStyle(fontWeight: FontWeight.w700, color: color, fontSize: 13),
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: color,
+                fontSize: 13,
+              ),
             ),
           ),
         ],
@@ -348,7 +386,9 @@ class _Actions extends StatelessWidget {
           Expanded(
             child: FilledButton.icon(
               style: FilledButton.styleFrom(
-                backgroundColor: alert.isSos ? AppColors.sos : AppColors.lostPerson,
+                backgroundColor: alert.isSos
+                    ? AppColors.sos
+                    : AppColors.lostPerson,
               ),
               onPressed: () => mesh.claimAlert(alert),
               icon: const Icon(Icons.pan_tool_alt, size: 18),
@@ -396,7 +436,9 @@ class _Actions extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
               child: Text(
                 'Close this alert',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
               ),
             ),
             Padding(
@@ -407,25 +449,42 @@ class _Actions extends StatelessWidget {
                 // searching.
                 'Nearby phones will be told, and will stop passing this alert on.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
             ListTile(
               leading: const Icon(Icons.favorite, color: AppColors.relayed),
-              title: const Text('Found safe', style: TextStyle(fontWeight: FontWeight.w700)),
+              title: const Text(
+                'Found safe',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
               subtitle: const Text('The person is back with their people'),
               onTap: () => Navigator.pop(context, kResolveFound),
             ),
             ListTile(
-              leading: const Icon(Icons.medical_services_outlined, color: AppColors.lostPerson),
-              title: const Text('Handled', style: TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: const Text('Dealt with — treated, escorted, passed to police'),
+              leading: const Icon(
+                Icons.medical_services_outlined,
+                color: AppColors.lostPerson,
+              ),
+              title: const Text(
+                'Handled',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              subtitle: const Text(
+                'Dealt with — treated, escorted, passed to police',
+              ),
               onTap: () => Navigator.pop(context, kResolveHandled),
             ),
             ListTile(
-              leading: const Icon(Icons.cancel_outlined, color: AppColors.neutral),
-              title: const Text('False alarm', style: TextStyle(fontWeight: FontWeight.w700)),
+              leading: const Icon(
+                Icons.cancel_outlined,
+                color: AppColors.neutral,
+              ),
+              title: const Text(
+                'False alarm',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
               subtitle: const Text('Sent by mistake'),
               onTap: () => Navigator.pop(context, kResolveFalseAlarm),
             ),
