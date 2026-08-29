@@ -29,6 +29,10 @@ const Duration kPresenceInterval = Duration(seconds: 15);
 // haven't heard someone in 3 beacon intervals, treat them as out of range
 // rather than showing a stale headcount that never shrinks.
 const Duration kPresenceExpiry = Duration(seconds: 45);
+// How long a person stays *remembered* after they stop being *nearby*. Far
+// longer than kPresenceExpiry on purpose — see MeshService._evictStalePresence
+// for why a name outlives a presence, and why the map needs a bound at all.
+const Duration kPresenceMemory = Duration(minutes: 30);
 
 // ---------------------------------------------------------------------------
 // Airtime — why an alert stays on the air for a minute, not three seconds.
@@ -1265,7 +1269,29 @@ class MeshService extends ChangeNotifier {
       packet.station,
       packet.isDindiLead,
     );
+    _evictStalePresence();
     notifyListeners();
+  }
+
+  /// Drops presence entries nobody has heard from in a long while.
+  ///
+  /// Every reader of [_presence] already filters on kPresenceExpiry, so
+  /// stale entries were never *shown* — but nothing ever removed them, and
+  /// the map grew for the lifetime of the process. That was invisible until
+  /// the app ran next to real Bluetooth traffic and started manufacturing a
+  /// new identity out of every passing advertisement (see isPlausibleMeshId,
+  /// which now rejects those at the door). Both halves are worth fixing: an
+  /// app meant to run for twelve hours of walking should not accumulate
+  /// state it can never use again.
+  ///
+  /// The cutoff is deliberately far longer than kPresenceExpiry. Someone who
+  /// drops out of range for a few minutes and comes back should still be a
+  /// familiar name rather than a stranger, and [nameFor] is what turns a
+  /// Mesh ID on an incoming ACK into a person — that lookup stays useful
+  /// long after somebody has stopped being "nearby".
+  void _evictStalePresence() {
+    final cutoff = DateTime.now().subtract(kPresenceMemory);
+    _presence.removeWhere((_, entry) => entry.lastHeard.isBefore(cutoff));
   }
 
   // ---------------------------------------------------------------------

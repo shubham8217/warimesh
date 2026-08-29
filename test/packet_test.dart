@@ -316,6 +316,73 @@ void main() {
     );
   });
 
+  group('presence rejects ambient Bluetooth noise', () {
+    // Regression tests for something a real phone found: kManufacturerId is
+    // 0xFFFF, the BT SIG "reserved for testing" ID that unbranded BLE
+    // gadgets also use, so their advertisements reach the decoder. On an
+    // ordinary street the app logged 65 such sightings in 20 seconds and
+    // turned each into a person in the Dindi headcount.
+
+    test('accepts identifiers this app actually generates', () {
+      for (final role in UserRole.values) {
+        expect(isPlausibleMeshId(generateMeshId(role)), isTrue);
+      }
+      expect(isPlausibleMeshId('W7K2M9'), isTrue);
+      expect(isPlausibleMeshId('V4B2XY'), isTrue);
+    });
+
+    test('rejects the shapes random bytes actually produce', () {
+      expect(isPlausibleMeshId(''), isFalse);
+      expect(isPlausibleMeshId('W7K2M'), isFalse); // too short
+      expect(isPlausibleMeshId('W7K2M99'), isFalse); // too long
+      expect(isPlausibleMeshId('X7K2M9'), isFalse); // not a role letter
+      expect(isPlausibleMeshId('w7k2m9'), isFalse); // lower case
+      // 0, O, 1, I and L are deliberately absent from the alphabet because
+      // they are ambiguous when read aloud — so they are also a good signal
+      // that something did not come from generateMeshId.
+      expect(isPlausibleMeshId('W0K2M9'), isFalse);
+      expect(isPlausibleMeshId('W1K2M9'), isFalse);
+      expect(isPlausibleMeshId('W K2M9'), isFalse);
+      expect(isPlausibleMeshId('W?K2M9'), isFalse);
+    });
+
+    test('a beacon with a garbage identifier is dropped entirely', () {
+      // The actual defence: decode() returns null rather than handing back a
+      // packet that a caller would file as a nearby person.
+      final bytes = PresencePacket(
+        meshId: 'W7K2M9',
+        groupTag: 'AB',
+        name: 'Rahul',
+      ).encode();
+      // Corrupt the identifier the way a foreign advertisement would.
+      bytes[1] = 0x00;
+      bytes[2] = 0xFF;
+      expect(PresencePacket.decode(bytes), isNull);
+    });
+
+    test('a genuine beacon still decodes in all three wire lengths', () {
+      // The rejection must not cost backward compatibility — a phone that
+      // cannot be updated mid-Wari has to stay visible.
+      final full = PresencePacket(
+        meshId: 'W7K2M9',
+        groupTag: 'AB',
+        name: 'Rahul',
+        station: kStationWater,
+        isDindiLead: true,
+      ).encode();
+
+      expect(PresencePacket.decode(full)!.meshId, 'W7K2M9');
+      expect(
+        PresencePacket.decode(full.sublist(0, kPresencePacketLength))!.meshId,
+        'W7K2M9',
+      );
+      expect(
+        PresencePacket.decode(full.sublist(0, kPresenceBaseLength))!.meshId,
+        'W7K2M9',
+      );
+    });
+  });
+
   group('PresencePacket Dindi Lead flag', () {
     test('round-trips true and false', () {
       for (final lead in [true, false]) {

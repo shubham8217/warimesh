@@ -804,6 +804,34 @@ const String _kMeshIdAlphabet = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 /// regenerating a random "DEV482"-style label on every app launch, which
 /// made relay logs and "who sent this" attribution meaningless across
 /// restarts.
+/// Whether [id] is shaped like a Mesh ID this app actually generates: a
+/// W or V role letter followed by five characters from [_kMeshIdAlphabet].
+///
+/// This exists because of what a real phone heard the first time this app
+/// was run next to ordinary Bluetooth traffic. [kManufacturerId] is 0xFFFF,
+/// the BT SIG "reserved for testing" ID — which plenty of unbranded BLE
+/// gadgets and dev boards also use. The scan filter therefore lets their
+/// advertisements through, and any of them whose first byte happens to be
+/// [kPresencePacketType] was being decoded as a person: 65 such sightings
+/// in 20 seconds on an ordinary street, each one manufacturing a stranger
+/// out of random bytes and putting them in the Dindi headcount.
+///
+/// Checking the shape of the identifier is the cheap, high-yield defence.
+/// Random data essentially never produces six characters that all land in a
+/// 31-character alphabet after a role letter (~1 in 10^9), whereas every
+/// genuine WariMesh beacon passes by construction. It is NOT authentication
+/// — anyone who knows the format can still forge one, and the notes on
+/// kAckPacketType are honest about that — it only rejects noise, which is
+/// what was actually corrupting the headcount.
+bool isPlausibleMeshId(String id) {
+  if (id.length != 6) return false;
+  if (id[0] != 'W' && id[0] != 'V') return false;
+  for (var i = 1; i < 6; i++) {
+    if (!_kMeshIdAlphabet.contains(id[i])) return false;
+  }
+  return true;
+}
+
 String generateMeshId(UserRole role) {
   final rand = Random.secure();
   final prefix = role == UserRole.warkari ? 'W' : 'V';
@@ -1046,6 +1074,11 @@ class PresencePacket {
     final leadByte = raw.length > kPresencePacketLength
         ? raw[kPresencePacketLength]
         : 0;
+    // Reject anything not shaped like one of our own identifiers — see
+    // isPlausibleMeshId for the ambient-Bluetooth problem this solves.
+    // Deliberately placed here in decode() rather than at the call site, so
+    // every consumer of a PresencePacket gets the guarantee.
+    if (!isPlausibleMeshId(meshId)) return null;
     return PresencePacket(
       meshId: meshId,
       groupTag: groupTag,
