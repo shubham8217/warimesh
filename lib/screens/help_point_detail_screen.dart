@@ -4,6 +4,7 @@
 // the note on HelpPointRecord.acknowledged.
 import 'package:flutter/material.dart';
 
+import '../directions.dart';
 import '../mesh_service.dart';
 import '../models.dart';
 import '../theme.dart';
@@ -11,7 +12,11 @@ import '../theme.dart';
 class HelpPointDetailScreen extends StatefulWidget {
   final MeshService mesh;
   final HelpPointRecord point;
-  const HelpPointDetailScreen({super.key, required this.mesh, required this.point});
+  const HelpPointDetailScreen({
+    super.key,
+    required this.mesh,
+    required this.point,
+  });
 
   @override
   State<HelpPointDetailScreen> createState() => _HelpPointDetailScreenState();
@@ -37,6 +42,20 @@ class _HelpPointDetailScreenState extends State<HelpPointDetailScreen> {
     if (_point.isClosed) return AppColors.neutral;
     if (_point.isLimited) return AppColors.warning;
     return AppColors.relayed;
+  }
+
+  /// Hands the help point's coordinates to a maps app, exactly as the alert
+  /// overlay does for an SOS. Only reachable when hasLocation is true.
+  Future<void> _openDirections(BuildContext context) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final opened = await openWalkingDirections(
+      _point.latitude!,
+      _point.longitude!,
+    );
+    if (opened || !context.mounted) return;
+    messenger?.showSnackBar(
+      const SnackBar(content: Text('No maps app could open on this phone')),
+    );
   }
 
   Future<void> _iAmGoing() async {
@@ -75,18 +94,30 @@ class _HelpPointDetailScreenState extends State<HelpPointDetailScreen> {
                   const SizedBox(height: 14),
                   Text(
                     '${_point.label} assistance available',
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20, color: _statusColor),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 20,
+                      color: _statusColor,
+                    ),
                   ),
                   const SizedBox(height: 10),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: _statusColor.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(30),
                     ),
                     child: Text(
                       helpStatusLabel(_point.status).toUpperCase(),
-                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: _statusColor, letterSpacing: 0.5),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                        color: _statusColor,
+                        letterSpacing: 0.5,
+                      ),
                     ),
                   ),
                 ],
@@ -107,6 +138,18 @@ class _HelpPointDetailScreenState extends State<HelpPointDetailScreen> {
                           : 'Relayed through ${_point.hops} phone${_point.hops == 1 ? '' : 's'} to reach you',
                     ),
                     const Divider(height: 24),
+                    const Divider(height: 24),
+                    _InfoLine(
+                      icon: _point.distanceLabel == null
+                          ? Icons.location_off_outlined
+                          : Icons.near_me,
+                      title: _point.distanceLabel ?? 'Location',
+                      // Never fabricated — see HelpPointRecord.whereLabel.
+                      detail: _point.distanceLabel == null
+                          ? _point.whereLabel
+                          : 'To your ${_point.directionLabel}',
+                    ),
+                    const Divider(height: 24),
                     _InfoLine(
                       icon: Icons.schedule,
                       title: 'Last updated',
@@ -120,14 +163,36 @@ class _HelpPointDetailScreenState extends State<HelpPointDetailScreen> {
             Text(
               'A BLE broadcast is public and unencrypted — this is a location a '
               'volunteer chose to share, not a private message.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: muted),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: muted),
             ),
             const SizedBox(height: 24),
+            // Directions only when there is a real position to hand over —
+            // an offer to navigate to nowhere is worse than no offer.
+            if (!_point.isClosed && _point.hasLocation) ...[
+              FilledButton.icon(
+                onPressed: () => _openDirections(context),
+                icon: const Icon(Icons.directions_walk),
+                label: const Text('Open directions'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                  backgroundColor: AppColors.relayed,
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
             if (!_point.isClosed)
               FilledButton.icon(
                 onPressed: _point.acknowledged ? null : _iAmGoing,
-                icon: Icon(_point.acknowledged ? Icons.check : Icons.directions_walk),
-                label: Text(_point.acknowledged ? "You're on your way" : "I'm going there"),
+                icon: Icon(
+                  _point.acknowledged ? Icons.check : Icons.directions_walk,
+                ),
+                label: Text(
+                  _point.acknowledged
+                      ? "You're on your way"
+                      : "I'm going there",
+                ),
                 style: FilledButton.styleFrom(
                   minimumSize: const Size.fromHeight(52),
                   backgroundColor: AppColors.relayed,
@@ -144,7 +209,11 @@ class _InfoLine extends StatelessWidget {
   final IconData icon;
   final String title;
   final String detail;
-  const _InfoLine({required this.icon, required this.title, required this.detail});
+  const _InfoLine({
+    required this.icon,
+    required this.title,
+    required this.detail,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -158,9 +227,20 @@ class _InfoLine extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
+              ),
               const SizedBox(height: 2),
-              Text(detail, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: muted)),
+              Text(
+                detail,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: muted),
+              ),
             ],
           ),
         ),

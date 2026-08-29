@@ -600,6 +600,15 @@ class MeshService extends ChangeNotifier {
         kHelpPointAirtime,
         priority: kPriorityHelpPoint,
       );
+      // Where the tent actually is, on an ordinary LocationPacket carrying
+      // this help point's msgId — the same mechanism an alert uses, reused
+      // wholesale. See the note above kHelpPointPacketType for why a help
+      // point publishes a position at all.
+      _broadcastLocationFor(
+        msgId,
+        airtime: kHelpPointAirtime,
+        what: 'help point',
+      );
       appendLog(
         'Announced ${stationLabel(helpType)} help point — visible to nearby WariMesh users',
         'Sent',
@@ -622,6 +631,10 @@ class MeshService extends ChangeNotifier {
       hops: 0,
       mine: true,
       status: status,
+      // Our own help point knows where it is straight away — no need to
+      // wait to hear our own LocationPacket back (we never do).
+      latitude: location.lastKnown?.latitude,
+      longitude: location.lastKnown?.longitude,
     );
     try {
       await HelpPointsDb.insertIfNew(record);
@@ -681,6 +694,7 @@ class MeshService extends ChangeNotifier {
       helpPoints
         ..clear()
         ..addAll(rows);
+      _stampHelpPointDistances();
       notifyListeners();
     } catch (e) {
       appendLog('Could not load nearby seva: $e', 'Warning');
@@ -1370,6 +1384,32 @@ class MeshService extends ChangeNotifier {
     }
   }
 
+  /// Recomputes how far away each located help point is, from wherever this
+  /// phone is now. Cheap, and correct only at the moment it runs — which is
+  /// why it runs on every load rather than being stored. Exactly the same
+  /// treatment (and the same reason) as _stampDistances for alerts: the
+  /// pilgrim is walking.
+  void _stampHelpPointDistances() {
+    final me = location.lastKnown;
+    if (me == null) return;
+    for (final h in helpPoints) {
+      final lat = h.latitude, lon = h.longitude;
+      if (lat == null || lon == null) continue;
+      h.distanceMetres = LocationService.distanceBetween(
+        me.latitude,
+        me.longitude,
+        lat,
+        lon,
+      );
+      h.bearingDegrees = LocationService.bearingBetween(
+        me.latitude,
+        me.longitude,
+        lat,
+        lon,
+      );
+    }
+  }
+
   AlertRecord? _findAlert(int msgId) {
     for (final a in alerts) {
       if (a.msgId == msgId) return a;
@@ -1732,6 +1772,11 @@ class MeshService extends ChangeNotifier {
           hops: kDefaultTtl - packet.ttl,
           mine: false,
           status: packet.status,
+          // The announcement and its position take turns on the air, so
+          // either can land first. This covers "position arrived first";
+          // _handleLocation covers the other order.
+          latitude: _alertLocations[packet.msgId]?.latitude,
+          longitude: _alertLocations[packet.msgId]?.longitude,
         ),
       );
       await loadHelpPoints();
@@ -1750,6 +1795,19 @@ class MeshService extends ChangeNotifier {
         kHelpPointRelayAirtime,
         priority: kPriorityHelpPoint,
       );
+      // The position has to travel as far as the announcement does, exactly
+      // as it does for an alert — otherwise a phone two hops out learns a
+      // medical tent exists but not where, which is the situation this
+      // whole change exists to fix.
+      final loc = _alertLocations[relayed.msgId];
+      if (loc != null) {
+        _queueBroadcast(
+          'loc:${relayed.msgId}',
+          loc.encode(),
+          kHelpPointRelayAirtime,
+          priority: kPriorityHelpPoint,
+        );
+      }
       appendLog(
         'Relayed help point via $deviceLabel (TTL now ${relayed.ttl})',
         'Relayed',
@@ -1814,7 +1872,33 @@ class MeshService extends ChangeNotifier {
         }
       }());
     }
-    appendLog('Position received for alert #${loc.msgId}', 'Received');
+
+    // A LocationPacket is keyed by msgId and says nothing about what kind of
+    // thing that msgId belongs to, which is exactly why a help point could
+    // reuse it without a new wire format. Whichever table owns the id gets
+    // the position; if neither does yet, it is still cached above in
+    // _alertLocations for whenever the announcement lands.
+    final isHelpPoint = helpPoints.any((h) => h.msgId == loc.msgId);
+    if (isHelpPoint) {
+      unawaited(() async {
+        try {
+          await HelpPointsDb.setLocation(
+            loc.msgId,
+            loc.latitude,
+            loc.longitude,
+          );
+          await loadHelpPoints();
+        } catch (_) {
+          // Losing this costs a distance on the Seva card, never the help
+          // point itself.
+        }
+      }());
+    }
+
+    appendLog(
+      'Position received for ${isHelpPoint ? 'help point' : 'alert'} #${loc.msgId}',
+      'Received',
+    );
 
     // The alert and its position travel as separate packets that take turns
     // on the air, so the alert almost always lands first — meaning the
@@ -2435,7 +2519,13 @@ class MeshService extends ChangeNotifier {
   /// broadcast key. Worst case the receiver gets a slightly stale position;
   /// that is enormously better than no position, and better than an SOS
   /// that took 30 seconds to send.
-  void _broadcastLocationFor(int msgId) {
+  /// [airtime] lets a help point's position ride for as long as the help
+  /// point announcement itself, rather than the alert default.
+  void _broadcastLocationFor(
+    int msgId, {
+    Duration airtime = kAlertAirtime,
+    String what = 'alert',
+  }) {
     final cached = location.lastKnown;
     if (cached != null) {
       final loc = LocationPacket(
@@ -2444,11 +2534,11 @@ class MeshService extends ChangeNotifier {
         longitude: cached.longitude,
       );
       _alertLocations[msgId] = loc;
-      _queueBroadcast('loc:$msgId', loc.encode(), kAlertAirtime, priority: 2);
-      appendLog('Your position is going out with this alert', 'Sent');
+      _queueBroadcast('loc:$msgId', loc.encode(), airtime, priority: 2);
+      appendLog('Your position is going out with this $what', 'Sent');
     } else {
       appendLog(
-        'No location fix yet — this alert goes out without a position',
+        'No location fix yet — this $what goes out without a position',
         'Warning',
       );
     }
@@ -2464,10 +2554,10 @@ class MeshService extends ChangeNotifier {
       _alertLocations[msgId] = loc;
       // Same key, so this replaces the cached position rather than
       // competing with it for airtime.
-      _queueBroadcast('loc:$msgId', loc.encode(), kAlertAirtime, priority: 2);
+      _queueBroadcast('loc:$msgId', loc.encode(), airtime, priority: 2);
       if (cached == null) {
         appendLog(
-          'Got a location fix — now sending it with your alert',
+          'Got a location fix — now sending it with your $what',
           'Sent',
         );
       }

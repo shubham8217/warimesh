@@ -201,12 +201,31 @@ class NearbySevaCard extends StatelessWidget {
                 point.label,
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
-              subtitle: Text(
-                '${helpStatusLabel(point.status)} · ${point.freshnessLabel}',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: muted),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${helpStatusLabel(point.status)} · ${point.freshnessLabel}',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: muted),
+                  ),
+                  // Where it is, or the honest reason there is no distance.
+                  // See HelpPointRecord.whereLabel — never fabricated.
+                  Text(
+                    point.whereLabel,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: point.distanceLabel == null
+                          ? muted
+                          : AppColors.relayed,
+                      fontWeight: point.distanceLabel == null
+                          ? null
+                          : FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
+              isThreeLine: true,
               trailing: const Icon(Icons.chevron_right),
             ),
         ],
@@ -597,6 +616,18 @@ class RelevantSevaCard extends StatelessWidget {
                                 style: Theme.of(
                                   context,
                                 ).textTheme.bodySmall?.copyWith(color: muted),
+                              ),
+                              Text(
+                                point.whereLabel,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: point.distanceLabel == null
+                                          ? muted
+                                          : AppColors.relayed,
+                                      fontWeight: point.distanceLabel == null
+                                          ? null
+                                          : FontWeight.w700,
+                                    ),
                               ),
                             ],
                           ),

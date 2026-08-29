@@ -1171,6 +1171,88 @@ void main() {
     });
   });
 
+  group('help point location', () {
+    HelpPointRecord point({
+      double? lat,
+      double? lon,
+      double? dist,
+      double? bearing,
+    }) =>
+        HelpPointRecord(
+            msgId: 1,
+            helpType: kStationMedical,
+            senderLabel: 'V7K2M9',
+            receivedAt: DateTime.now(),
+            expiresAt: DateTime.now().add(const Duration(hours: 2)),
+            latitude: lat,
+            longitude: lon,
+          )
+          ..distanceMetres = dist
+          ..bearingDegrees = bearing;
+
+    test('reuses LocationPacket unchanged — no new wire format', () {
+      // The point of the design: a help point's position is an ordinary
+      // LocationPacket carrying the help point's msgId.
+      final loc = LocationPacket(
+        msgId: 987654321,
+        latitude: 17.679076,
+        longitude: 75.323997,
+      );
+      final decoded = LocationPacket.decode(loc.encode())!;
+      expect(decoded.msgId, 987654321);
+      expect(decoded.latitude, closeTo(17.679076, 1e-6));
+    });
+
+    test('shows a distance and direction once both ends have a position', () {
+      final p = point(lat: 17.6, lon: 75.3, dist: 240, bearing: 45);
+      expect(p.hasLocation, isTrue);
+      expect(p.distanceLabel, '240 m away');
+      expect(p.directionLabel, 'north-east');
+      expect(p.whereLabel, '240 m away, to your north-east');
+    });
+
+    test('switches to kilometres past a kilometre', () {
+      expect(point(lat: 1, lon: 1, dist: 1440).distanceLabel, '1.4 km away');
+    });
+
+    test('never invents a distance when the volunteer had no fix', () {
+      // The honesty rule. A help point with no position is still worth
+      // showing — it just says so.
+      final p = point();
+      expect(p.hasLocation, isFalse);
+      expect(p.distanceLabel, isNull);
+      expect(p.whereLabel, contains('Location unavailable'));
+    });
+
+    test('says so when the help point is located but this phone is not', () {
+      // Position known, no fix here to measure from — a real and different
+      // state from "no position at all".
+      final p = point(lat: 17.6, lon: 75.3);
+      expect(p.hasLocation, isTrue);
+      expect(p.distanceLabel, isNull);
+      expect(p.whereLabel, contains('no fix on this phone'));
+    });
+
+    test('coordinates survive a round-trip through the database map', () {
+      final restored = HelpPointRecord.fromMap(
+        point(lat: 17.679076, lon: 75.323997).toMap().cast<String, Object?>(),
+      );
+      expect(restored.latitude, closeTo(17.679076, 1e-9));
+      expect(restored.longitude, closeTo(75.323997, 1e-9));
+      expect(restored.hasLocation, isTrue);
+    });
+
+    test(
+      'a row written before help points had coordinates reads as unlocated',
+      () {
+        final legacy = point(lat: 1, lon: 1).toMap().cast<String, Object?>()
+          ..remove('latitude')
+          ..remove('longitude');
+        expect(HelpPointRecord.fromMap(legacy).hasLocation, isFalse);
+      },
+    );
+  });
+
   group('SpottedPacket — missing-person sightings', () {
     test('round-trips a sighting with a position', () {
       final packet = SpottedPacket(

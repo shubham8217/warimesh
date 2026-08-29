@@ -70,9 +70,9 @@ class HomeScreen extends StatelessWidget {
             IconButton(
               tooltip: 'Relay status',
               icon: const Icon(Icons.hub_outlined),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => OpsScreen(mesh: mesh)),
-              ),
+              onPressed: () => Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => OpsScreen(mesh: mesh))),
             ),
             PopupMenuButton<String>(
               tooltip: 'More',
@@ -85,7 +85,9 @@ class HomeScreen extends StatelessWidget {
                     onOpenMissing();
                   case 'log':
                     Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => ActivityLogScreen(mesh: mesh)),
+                      MaterialPageRoute(
+                        builder: (_) => ActivityLogScreen(mesh: mesh),
+                      ),
                     );
                   case 'logout':
                     onLogout();
@@ -102,36 +104,44 @@ class HomeScreen extends StatelessWidget {
                 const PopupMenuDivider(),
                 const PopupMenuItem<String>(
                   value: 'sos',
-                  child: Row(children: [
-                    Icon(Icons.sos, size: 18, color: AppColors.sos),
-                    SizedBox(width: 10),
-                    Text('Send an SOS'),
-                  ]),
+                  child: Row(
+                    children: [
+                      Icon(Icons.sos, size: 18, color: AppColors.sos),
+                      SizedBox(width: 10),
+                      Text('Send an SOS'),
+                    ],
+                  ),
                 ),
                 const PopupMenuItem<String>(
                   value: 'missing',
-                  child: Row(children: [
-                    Icon(Icons.person_add_alt, size: 18),
-                    SizedBox(width: 10),
-                    Text('Report someone missing'),
-                  ]),
+                  child: Row(
+                    children: [
+                      Icon(Icons.person_add_alt, size: 18),
+                      SizedBox(width: 10),
+                      Text('Report someone missing'),
+                    ],
+                  ),
                 ),
                 const PopupMenuItem<String>(
                   value: 'log',
-                  child: Row(children: [
-                    Icon(Icons.history, size: 18),
-                    SizedBox(width: 10),
-                    Text('Activity log'),
-                  ]),
+                  child: Row(
+                    children: [
+                      Icon(Icons.history, size: 18),
+                      SizedBox(width: 10),
+                      Text('Activity log'),
+                    ],
+                  ),
                 ),
                 const PopupMenuDivider(),
                 const PopupMenuItem<String>(
                   value: 'logout',
-                  child: Row(children: [
-                    Icon(Icons.logout, size: 18),
-                    SizedBox(width: 10),
-                    Text('Sign out'),
-                  ]),
+                  child: Row(
+                    children: [
+                      Icon(Icons.logout, size: 18),
+                      SizedBox(width: 10),
+                      Text('Sign out'),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -160,7 +170,10 @@ class HomeScreen extends StatelessWidget {
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => OpsScreen(mesh: mesh)),
                 ),
-                child: StatusBox(bluetoothOn: mesh.bluetoothOn, scanningOk: scanningOk),
+                child: StatusBox(
+                  bluetoothOn: mesh.bluetoothOn,
+                  scanningOk: scanningOk,
+                ),
               ),
             ]),
           ),
@@ -179,7 +192,11 @@ class QueueSummary extends StatelessWidget {
   final MeshService mesh;
   final VoidCallback onOpenAlerts;
 
-  const QueueSummary({super.key, required this.mesh, required this.onOpenAlerts});
+  const QueueSummary({
+    super.key,
+    required this.mesh,
+    required this.onOpenAlerts,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -187,7 +204,9 @@ class QueueSummary extends StatelessWidget {
     final unclaimed = queue.where((a) => a.isOpen).length;
     final claimed = queue.where((a) => a.isClaimed).length;
     final quiet = unclaimed == 0 && claimed == 0;
-    final color = unclaimed > 0 ? AppColors.sos : (claimed > 0 ? AppColors.warning : AppColors.relayed);
+    final color = unclaimed > 0
+        ? AppColors.sos
+        : (claimed > 0 ? AppColors.warning : AppColors.relayed);
 
     return InkWell(
       borderRadius: BorderRadius.circular(20),
@@ -216,15 +235,19 @@ class QueueSummary extends StatelessWidget {
                     quiet
                         ? 'Nobody waiting'
                         : '$unclaimed ${unclaimed == 1 ? 'person needs' : 'people need'} help',
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 19, color: color),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 19,
+                      color: color,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     quiet
                         ? 'Listening. Anything that arrives shows up here.'
                         : claimed > 0
-                            ? '$claimed already being handled'
-                            : 'Nobody has responded yet',
+                        ? '$claimed already being handled'
+                        : 'Nobody has responded yet',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
@@ -249,7 +272,11 @@ class DutyCard extends StatelessWidget {
   final int station;
   final ValueChanged<int> onStationChanged;
 
-  const DutyCard({super.key, required this.station, required this.onStationChanged});
+  const DutyCard({
+    super.key,
+    required this.station,
+    required this.onStationChanged,
+  });
 
   static const Map<int, IconData> _icons = {
     kStationNone: Icons.person_outline,
@@ -276,7 +303,12 @@ class DutyCard extends StatelessWidget {
         title: Text('Announce ${stationLabel(newStation)} Help'),
         content: Text(
           '${stationAnnounceLabel(newStation)} will be visible to nearby WariMesh '
-          'users — including phones out of direct range, relayed hop by hop.',
+          'users — including phones out of direct range, relayed hop by hop.\n\n'
+          // Said plainly at the moment of choosing, because this is the one
+          // place a volunteer decides to publish where they are standing.
+          'Your position goes out with it, so people can be told which way '
+          'to walk. A Bluetooth broadcast is public — anyone in range can '
+          'read it.',
         ),
         actions: [
           TextButton(
@@ -293,9 +325,13 @@ class DutyCard extends StatelessWidget {
     if (confirmed != true) return;
     onStationChanged(newStation);
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('${stationLabel(newStation)} help point is now visible to nearby WariMesh users.'),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${stationLabel(newStation)} help point is now visible to nearby WariMesh users.',
+          ),
+        ),
+      );
     }
   }
 
@@ -316,7 +352,11 @@ class DutyCard extends StatelessWidget {
                 CircleAvatar(
                   radius: 20,
                   backgroundColor: color.withValues(alpha: 0.12),
-                  child: Icon(_icons[station] ?? Icons.person_outline, color: color, size: 22),
+                  child: Icon(
+                    _icons[station] ?? Icons.person_outline,
+                    color: color,
+                    size: 22,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -325,14 +365,19 @@ class DutyCard extends StatelessWidget {
                     children: [
                       Text(
                         onDuty ? stationLabel(station) : 'Not at a help point',
-                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 17,
+                        ),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         onDuty
                             ? 'Pilgrims in range can see help is here'
                             : 'Tap to announce a help point',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: muted),
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(color: muted),
                       ),
                     ],
                   ),

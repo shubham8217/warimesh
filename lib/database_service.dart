@@ -16,7 +16,7 @@ import 'models.dart';
 
 class AppDatabase {
   static Database? _db;
-  static const int _version = 11;
+  static const int _version = 12;
 
   /// The database filename. A constant in the app; overridable only so that
   /// test files can each own their own file.
@@ -122,6 +122,17 @@ class AppDatabase {
           await _addColumnIfMissing(db, 'alerts', 'spotted_lat', 'REAL');
           await _addColumnIfMissing(db, 'alerts', 'spotted_lon', 'REAL');
         }
+        if (oldVersion < 12) {
+          // Where a help point actually is. Arrives on an ordinary
+          // LocationPacket carrying the help point's msgId — see the note
+          // above kHelpPointPacketType for why the announcement itself
+          // still carries no coordinates, and why this reverses an earlier
+          // decision. Nullable because a volunteer's phone may have had no
+          // GPS fix when they went on duty, and a help point with no
+          // position is still worth knowing about.
+          await _addColumnIfMissing(db, 'help_points', 'latitude', 'REAL');
+          await _addColumnIfMissing(db, 'help_points', 'longitude', 'REAL');
+        }
       },
     );
     return _db!;
@@ -219,7 +230,11 @@ class AppDatabase {
         status INTEGER NOT NULL DEFAULT 0,
         closed_by TEXT,
         closed_at INTEGER,
-        acknowledged INTEGER NOT NULL DEFAULT 0
+        acknowledged INTEGER NOT NULL DEFAULT 0,
+        -- Kept in step with the v12 ALTERs in onUpgrade. See _createAlerts
+        -- for why every migration column must be repeated here.
+        latitude REAL,
+        longitude REAL
       )
     """);
   }
@@ -530,6 +545,19 @@ class HelpPointsDb {
         'closed_by': closedBy,
         'closed_at': closedAt?.millisecondsSinceEpoch,
       },
+      where: 'msg_id = ?',
+      whereArgs: [msgId],
+    );
+  }
+
+  /// Fills in where a help point is, from a LocationPacket that arrived
+  /// carrying its msgId. Separate from insertIfNew because the announcement
+  /// and its position travel as two packets and either can land first.
+  static Future<void> setLocation(int msgId, double lat, double lon) async {
+    final db = await AppDatabase.instance;
+    await db.update(
+      'help_points',
+      {'latitude': lat, 'longitude': lon},
       where: 'msg_id = ?',
       whereArgs: [msgId],
     );

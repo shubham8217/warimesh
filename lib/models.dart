@@ -410,11 +410,28 @@ String stationAnnounceLabel(int station) => '${stationLabel(station)} help';
 // unmodified here). HELP_POINT_STATUS_UPDATE (10) closes/updates it, mirroring
 // RESOLVE.
 //
-// Deliberately NOT carrying a location: see the note on kLocationPacketType
-// for why a *chosen* disclosure (an SOS) is a different privacy proposition
-// from a standing one, and PresencePacket above for why the mesh already
-// treats "can I hear it at all" as the proximity signal for exactly this
-// kind of beacon. HELP_POINT follows the same rule.
+// The HELP_POINT packet itself carries no coordinates, but a help point can
+// now have a position: the announcement is followed by an ordinary
+// LocationPacket (type 4) carrying the same msgId, exactly as an alert is.
+// That packet was always generic — it is keyed by msgId and knows nothing
+// about alerts — so this needed no new wire format at all.
+//
+// This reverses an earlier call in this file, and the reasoning is worth
+// recording. The original argument was that a continuously-broadcast
+// position is a different privacy proposition from the one-off position
+// attached to an SOS, so a help point should stand on "if you can hear it,
+// it is close enough to walk to". That is too strong here. A help point is
+// a PUBLIC SERVICE location, not a person's private one — a volunteer going
+// on duty at a medical tent is deliberately publishing where the tent is,
+// which is the entire point of announcing it. Withholding the direction
+// left a pilgrim in a crowd of a hundred thousand people knowing help
+// existed somewhere within Bluetooth range and nothing more.
+//
+// The privacy cost is real and is paid honestly rather than hidden: going
+// on duty is a deliberate, opt-in act, the duty dialog says the position
+// goes out, and the position rides only while the announcement is on the
+// air (see kHelpPointAirtime) rather than continuously. The presence beacon
+// still carries no location and never has.
 const int kHelpPointPacketType = 9;
 const int kHelpPointPacketLength =
     1 + 1 + 4 + 1 + 1 + 6 + 1; // 15 bytes — same budget as MeshPacket
@@ -722,6 +739,20 @@ class HelpPointRecord {
   /// never authoritative, just a note to themselves.
   bool acknowledged;
 
+  /// Where the help point is, when a LocationPacket carrying this msgId has
+  /// arrived. Null is completely normal and must stay showable: the
+  /// volunteer's phone may have had no GPS fix when they went on duty, and
+  /// a help point with no position is still worth knowing about.
+  double? latitude;
+  double? longitude;
+
+  /// How far and which way, computed against this phone's own position at
+  /// read time rather than stored — the pilgrim is walking, so a distance
+  /// frozen at receipt would be a lie within a minute. Same treatment as
+  /// AlertRecord.
+  double? distanceMetres;
+  double? bearingDegrees;
+
   HelpPointRecord({
     required this.msgId,
     required this.helpType,
@@ -735,7 +766,52 @@ class HelpPointRecord {
     this.closedBy,
     this.closedAt,
     this.acknowledged = false,
+    this.latitude,
+    this.longitude,
   });
+
+  bool get hasLocation => latitude != null && longitude != null;
+
+  /// "240 m away" / "1.4 km away", or null when there is nothing honest to
+  /// say. Never fabricated — see the note on kHelpPointPacketType.
+  String? get distanceLabel {
+    final d = distanceMetres;
+    if (d == null) return null;
+    if (d < 1000) return '${d.round()} m away';
+    return '${(d / 1000).toStringAsFixed(1)} km away';
+  }
+
+  /// Compass word rather than an arrow, for the same reason as elsewhere in
+  /// this app: an arrow reads as "point the phone this way", which would
+  /// need a magnetometer heading nothing here reads.
+  String? get directionLabel {
+    final b = bearingDegrees;
+    if (b == null) return null;
+    const points = [
+      'north',
+      'north-east',
+      'east',
+      'south-east',
+      'south',
+      'south-west',
+      'west',
+      'north-west',
+    ];
+    return points[(((b % 360) + 360) % 360 / 45).round() % 8];
+  }
+
+  /// The one line a walking pilgrim reads to decide whether to go. Falls
+  /// back through progressively weaker but always TRUE statements rather
+  /// than inventing a distance.
+  String get whereLabel {
+    final d = distanceLabel;
+    final dir = directionLabel;
+    if (d != null && dir != null) return '$d, to your $dir';
+    if (d != null) return d;
+    if (hasLocation)
+      return 'Position known — no fix on this phone to measure from';
+    return 'Location unavailable — nearby through WariMesh';
+  }
 
   bool get isOpen => status == kHelpStatusOpen;
   bool get isClosed => status == kHelpStatusClosed;
@@ -772,6 +848,8 @@ class HelpPointRecord {
     'closed_by': closedBy,
     'closed_at': closedAt?.millisecondsSinceEpoch,
     'acknowledged': acknowledged ? 1 : 0,
+    'latitude': latitude,
+    'longitude': longitude,
   };
 
   static HelpPointRecord fromMap(Map<String, Object?> map) => HelpPointRecord(
@@ -789,6 +867,8 @@ class HelpPointRecord {
         ? null
         : DateTime.fromMillisecondsSinceEpoch(map['closed_at'] as int),
     acknowledged: ((map['acknowledged'] as int?) ?? 0) == 1,
+    latitude: map['latitude'] as double?,
+    longitude: map['longitude'] as double?,
   );
 }
 
