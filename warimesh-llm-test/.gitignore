@@ -1,0 +1,16 @@
+# Gradle
+.gradle/
+build/
+local.properties
+
+# IDE
+.idea/
+*.iml
+
+# Secrets — never commit tokens
+.env
+
+# Model files (multi-GB)
+*.litertlm
+*.task
+*.tflite

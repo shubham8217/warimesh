@@ -1,10 +1,13 @@
-// WariMesh — bottom-nav shell hosting the three main screens. Owns the
-// single MeshService instance and rebuilds when it changes.
+// WariMesh — bottom-nav shell hosting the volunteer's screens. Owns the
+// single MeshService instance (and the on-device LlmService) and rebuilds
+// when the mesh changes.
 import 'package:flutter/material.dart';
 
+import '../llm_service.dart';
 import '../mesh_service.dart';
 import '../models.dart';
 import 'alert_overlay.dart';
+import 'assistant_screen.dart';
 import 'chat_screen.dart';
 import 'home_screen.dart';
 import 'missing_screen.dart';
@@ -23,16 +26,24 @@ class _RootShellState extends State<RootShell> {
   final MeshService mesh = MeshService();
   int _tab = 0;
 
+  // The assistant is given the live mesh so its system prompt can describe
+  // what this phone actually knows. Inference is entirely on-device (see
+  // llm_service.dart) — the only kind that makes sense in an app whose
+  // premise is having no network.
+  late final LlmService llm = LlmService(mesh: mesh, volunteerName: widget.volunteer.name);
+
   @override
   void initState() {
     super.initState();
     mesh.bootstrap(widget.volunteer);
     mesh.loadMessages();
+    llm.init();
   }
 
   @override
   void dispose() {
     mesh.dispose();
+    llm.dispose();
     super.dispose();
   }
 
@@ -54,6 +65,10 @@ class _RootShellState extends State<RootShell> {
       // will actually rebuild, instead of reusing identical widget objects
       // it can skip. That's why "Not connected" used to only update after
       // switching tabs (which does trigger the outer build via setState).
+      //
+      // New widget instances do NOT reset the screens' State: Flutter keeps
+      // State by runtime type and position, so the assistant's and chat's
+      // typed-but-unsent text survives every mesh notification.
       builder: (context, _) {
         final screens = [
           HomeScreen(
@@ -66,6 +81,7 @@ class _RootShellState extends State<RootShell> {
           SosScreen(mesh: mesh),
           MissingScreen(mesh: mesh),
           ChatScreen(mesh: mesh, profile: widget.volunteer),
+          AssistantScreen(llm: llm),
         ];
         return Scaffold(
           body: SafeArea(child: IndexedStack(index: _tab, children: screens)),
@@ -84,6 +100,11 @@ class _RootShellState extends State<RootShell> {
                 ),
                 selectedIcon: const Icon(Icons.forum),
                 label: 'Chat',
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.psychology_alt_outlined),
+                selectedIcon: Icon(Icons.psychology_alt),
+                label: 'Assistant',
               ),
             ],
           ),

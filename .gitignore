@@ -47,3 +47,17 @@ app.*.map.json
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# On-device LLM model — local dev download (never committed)
+*.litertlm
+*.task
+# Local APK builds — never committed (GitHub 100 MB hard block)
+*.apk
+warimesh-llm-test/llmtest.apk
+# Model is distributed via GitHub Release, NOT via git.
+# The 3.4 GB source file and its local split staging dir must never be
+# committed — release assets are 913,956,864 bytes each at:
+#   https://github.com/RohitSwami33/Warimesh1/releases/download/gemma-3n-e2b-v1/part{00..03}
+# The app downloads + concatenates them on first launch (see lib/llm_service.dart).
+/gemma-3n-E2B-it-int4.litertlm
+/llm-model/

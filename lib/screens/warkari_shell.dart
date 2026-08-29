@@ -1,13 +1,15 @@
 // WariMesh — bottom-nav shell for a signed-in warkari (pilgrim). Mirrors
 // root_shell.dart (the volunteer shell) but swaps the volunteer dashboard
-// for the trimmed-down WarkariHomeScreen; SOS and Missing are the same
-// screens either role uses.
+// for the trimmed-down WarkariHomeScreen; SOS, Missing, Chat and the
+// on-device Assistant are the same screens either role uses.
 import 'package:flutter/material.dart';
 
 import '../database_service.dart';
+import '../llm_service.dart';
 import '../mesh_service.dart';
 import '../models.dart';
 import 'alert_overlay.dart';
+import 'assistant_screen.dart';
 import 'chat_screen.dart';
 import 'missing_screen.dart';
 import 'sos_screen.dart';
@@ -27,11 +29,19 @@ class _WarkariShellState extends State<WarkariShell> {
   int _tab = 0;
   late UserProfile _profile = widget.warkari;
 
+  // The assistant is given the live mesh so its system prompt can describe
+  // what this phone actually knows — nearby Dindi members, active alerts,
+  // missing-person reports. Inference is entirely on-device (see
+  // llm_service.dart), which is the only kind that makes sense in an app
+  // whose premise is having no network.
+  late final LlmService llm = LlmService(mesh: mesh, volunteerName: widget.warkari.name);
+
   @override
   void initState() {
     super.initState();
     mesh.bootstrap(widget.warkari);
     mesh.loadMessages();
+    llm.init();
   }
 
   /// Called from WarkariHomeScreen after the Dindi picker sheet returns a
@@ -63,6 +73,7 @@ class _WarkariShellState extends State<WarkariShell> {
   @override
   void dispose() {
     mesh.dispose();
+    llm.dispose();
     super.dispose();
   }
 
@@ -84,6 +95,10 @@ class _WarkariShellState extends State<WarkariShell> {
       // will actually rebuild, instead of reusing identical widget objects
       // it can skip. That's why "Not connected" used to only update after
       // switching tabs (which does trigger the outer build via setState).
+      //
+      // New widget instances do NOT reset the screens' State: Flutter keeps
+      // State by runtime type and position, so the assistant's and chat's
+      // typed-but-unsent text survives every mesh notification.
       builder: (context, _) {
         final screens = [
           WarkariHomeScreen(
@@ -97,6 +112,7 @@ class _WarkariShellState extends State<WarkariShell> {
           SosScreen(mesh: mesh),
           MissingScreen(mesh: mesh),
           ChatScreen(mesh: mesh, profile: _profile),
+          AssistantScreen(llm: llm),
         ];
         return Scaffold(
           body: SafeArea(child: IndexedStack(index: _tab, children: screens)),
@@ -115,6 +131,11 @@ class _WarkariShellState extends State<WarkariShell> {
                 ),
                 selectedIcon: const Icon(Icons.forum),
                 label: 'Chat',
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.psychology_alt_outlined),
+                selectedIcon: Icon(Icons.psychology_alt),
+                label: 'Assistant',
               ),
             ],
           ),
