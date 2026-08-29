@@ -600,15 +600,6 @@ class MeshService extends ChangeNotifier {
         kHelpPointAirtime,
         priority: kPriorityHelpPoint,
       );
-      // Where the tent actually is, on an ordinary LocationPacket carrying
-      // this help point's msgId — the same mechanism an alert uses, reused
-      // wholesale. See the note above kHelpPointPacketType for why a help
-      // point publishes a position at all.
-      _broadcastLocationFor(
-        msgId,
-        airtime: kHelpPointAirtime,
-        what: 'help point',
-      );
       appendLog(
         'Announced ${stationLabel(helpType)} help point — visible to nearby WariMesh users',
         'Sent',
@@ -641,6 +632,21 @@ class MeshService extends ChangeNotifier {
       await loadHelpPoints();
     } catch (e) {
       appendLog('Could not file this help point: $e', 'Warning');
+    }
+
+    // Deliberately AFTER the row exists. This both airs the position and
+    // asks for a fresh GPS fix, and that fix writes itself back to this
+    // help point's row (see _storeLocationFor) — which it cannot do if the
+    // row is not there yet. A fast fix on a phone that already had GPS warm
+    // would otherwise be dropped on the floor, leaving the announcing phone
+    // showing "location unavailable" for its own tent while broadcasting a
+    // perfectly good position to everybody else.
+    if (peripheralSupported && bluetoothOn) {
+      _broadcastLocationFor(
+        msgId,
+        airtime: kHelpPointAirtime,
+        what: 'help point',
+      );
     }
   }
 
@@ -1861,39 +1867,11 @@ class MeshService extends ChangeNotifier {
   void _handleLocation(LocationPacket loc) {
     _alertLocations[loc.msgId] = loc;
 
-    if (_findAlert(loc.msgId) != null) {
-      unawaited(() async {
-        try {
-          await AlertsDb.setLocation(loc.msgId, loc.latitude, loc.longitude);
-          await loadAlerts();
-        } catch (_) {
-          // Same as the detail packet: losing this costs a distance on the
-          // queue card, never the alert itself.
-        }
-      }());
-    }
-
-    // A LocationPacket is keyed by msgId and says nothing about what kind of
-    // thing that msgId belongs to, which is exactly why a help point could
-    // reuse it without a new wire format. Whichever table owns the id gets
-    // the position; if neither does yet, it is still cached above in
-    // _alertLocations for whenever the announcement lands.
+    // Whichever table owns this id gets the position; if neither does yet,
+    // it stays cached above in _alertLocations for whenever the
+    // announcement lands. See _storeLocationFor.
     final isHelpPoint = helpPoints.any((h) => h.msgId == loc.msgId);
-    if (isHelpPoint) {
-      unawaited(() async {
-        try {
-          await HelpPointsDb.setLocation(
-            loc.msgId,
-            loc.latitude,
-            loc.longitude,
-          );
-          await loadHelpPoints();
-        } catch (_) {
-          // Losing this costs a distance on the Seva card, never the help
-          // point itself.
-        }
-      }());
-    }
+    unawaited(_storeLocationFor(loc.msgId, loc.latitude, loc.longitude));
 
     appendLog(
       'Position received for ${isHelpPoint ? 'help point' : 'alert'} #${loc.msgId}',
@@ -2555,6 +2533,15 @@ class MeshService extends ChangeNotifier {
       // Same key, so this replaces the cached position rather than
       // competing with it for airtime.
       _queueBroadcast('loc:$msgId', loc.encode(), airtime, priority: 2);
+      // …and write it to our OWN row as well. Without this the sending
+      // phone kept whatever cached position it had at the instant of
+      // announcing while every receiver got the better fix a few seconds
+      // later — so a volunteer's own screen showed their tent in the wrong
+      // place, or showed "location unavailable" for a help point that was
+      // in fact broadcasting a perfectly good position to everyone else.
+      // The announcing phone should be the BEST informed about where it is,
+      // not the worst.
+      await _storeLocationFor(msgId, fresh.latitude, fresh.longitude);
       if (cached == null) {
         appendLog(
           'Got a location fix — now sending it with your $what',
@@ -2562,6 +2549,29 @@ class MeshService extends ChangeNotifier {
         );
       }
     }());
+  }
+
+  /// Files a position against whichever local record owns [msgId].
+  ///
+  /// A LocationPacket is keyed by msgId and says nothing about what kind of
+  /// thing that id belongs to — which is what let a help point reuse the
+  /// alert's location machinery without a new wire format. This is the one
+  /// place that resolves the id to a table, used both for positions that
+  /// arrive over the air and for our own fresh GPS fix.
+  Future<void> _storeLocationFor(int msgId, double lat, double lon) async {
+    try {
+      if (_findAlert(msgId) != null) {
+        await AlertsDb.setLocation(msgId, lat, lon);
+        await loadAlerts();
+      }
+      if (helpPoints.any((h) => h.msgId == msgId)) {
+        await HelpPointsDb.setLocation(msgId, lat, lon);
+        await loadHelpPoints();
+      }
+    } catch (_) {
+      // Losing this costs a distance on a card, never the alert or the help
+      // point itself.
+    }
   }
 
   void _startCooldownTicker() {
