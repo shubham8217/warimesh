@@ -15,6 +15,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_ble_peripheral/flutter_ble_peripheral.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -22,15 +23,105 @@ import 'package:permission_handler/permission_handler.dart' as ph;
 
 import 'database_service.dart';
 import 'foreground_service.dart';
+import 'location_service.dart';
 import 'models.dart';
 import 'notification_service.dart';
 
 const Duration kSendCooldown = Duration(seconds: 10);
+const Duration kPresenceInterval = Duration(seconds: 15);
+// A presence entry older than this is dropped from the headcount — if we
+// haven't heard someone in 3 beacon intervals, treat them as out of range
+// rather than showing a stale headcount that never shrinks.
+const Duration kPresenceExpiry = Duration(seconds: 45);
+
+// ---------------------------------------------------------------------------
+// Airtime — why an alert stays on the air for a minute, not three seconds.
+//
+// When the receiving phone's screen is OFF, Android does NOT honour the
+// scan mode the app asked for. AOSP's ScanManager forces every scan into
+// SCAN_MODE_SCREEN_OFF: roughly a 512ms listening window once every
+// 5120ms, i.e. the radio is deaf ~90% of the time. A one-shot 3-second
+// advertisement is therefore a coin flip, and when it loses, the alert is
+// gone permanently — there was no retry.
+//
+// So a broadcast is no longer "advertise once and hope". Anything this
+// phone wants heard is registered with the rotation below and re-put on
+// the air, slot after slot, until its airtime expires. Sixty seconds of
+// repetition against a 10%-duty-cycle listener is the difference between
+// "usually missed" and "essentially certain".
+// Deliberately long. Every slot boundary that changes payload costs a
+// stop/start of the advertiser, and Android's BLE stack is fragile under
+// that churn (see the note in _serviceAdvertSlotInner). A lone SOS never
+// changes payload at all, so it claims the radio once and holds it.
+const Duration kAdvertSlot = Duration(seconds: 5);
+// Text fragments rotate faster than alerts. A message split into six
+// fragments would take half a minute to deliver at the alert slot, which is
+// useless for chat — but the churn that pace causes is bounded (it lasts
+// only as long as the message's airtime) rather than the endless rotation
+// that wedged the advertiser before. Alerts keep the slow, safe slot.
+const Duration kTextSlot = Duration(seconds: 2);
+const Duration kTextAirtime = Duration(seconds: 40);
+// Half-received messages don't wait forever for a fragment that was lost to
+// a passing bus; the sender re-airs the whole message for kTextAirtime, so
+// a genuinely reachable phone gets another chance well inside this window.
+const Duration kTextAssemblyExpiry = Duration(seconds: 90);
+const Duration kAlertAirtime = Duration(seconds: 60); // an alert we originated
+const Duration kRelayAirtime = Duration(seconds: 45); // an alert we're passing on
+
+// Airtime priorities. Only the top live tier gets the radio (see
+// _serviceAdvertSlotInner), so these are a strict pecking order, not
+// weights: an SOS silences chat, and chat silences the headcount beacon.
+const int kPriorityPresence = 0;
+const int kPriorityText = 1;
+const int kPriorityAlert = 2;
+
+/// One payload this phone is currently putting on the air, and until when.
+///
+/// [key] identifies the payload so re-registering the same alert refreshes
+/// its airtime instead of stacking duplicates. [priority] buys extra slots
+/// in the rotation — an SOS must not lose airtime to a headcount beacon.
+class _Broadcast {
+  final String key;
+  final Uint8List bytes;
+  final DateTime expiresAt;
+  final int priority;
+  /// How long this payload holds the radio before the rotation moves on.
+  /// Text uses a shorter slot than alerts so a fragmented message arrives
+  /// in seconds rather than half a minute — see kTextSlot.
+  final Duration slot;
+  _Broadcast(this.key, this.bytes, this.expiresAt, this.priority, this.slot);
+}
+
+/// Fragments of one text message gathered so far. [head] stays null until
+/// fragment 0 arrives, which is what tells us who sent it and how many
+/// fragments to expect — parts can and do arrive first.
+class _TextAssembly {
+  final int msgId;
+  final DateTime startedAt = DateTime.now();
+  final Map<int, String> chunks = {};
+  TextHeadPacket? head;
+  int? total;
+  _TextAssembly(this.msgId);
+}
+
+class _PresenceEntry {
+  final String groupTag;
+  final String name;
+  final DateTime lastHeard;
+  _PresenceEntry(this.groupTag, this.name, this.lastHeard);
+}
 
 class MeshService extends ChangeNotifier {
   final FlutterBlePeripheral _blePeripheral = FlutterBlePeripheral();
 
-  late final String deviceLabel = _generateDeviceLabel();
+  // Set by bootstrap(profile) before anything else runs. Falls back to a
+  // throwaway random identity only if bootstrap() is ever called without a
+  // signed-in profile (shouldn't happen — AuthGate always signs in first —
+  // but keeps this class from crashing if that assumption ever breaks).
+  String deviceLabel = 'V${Random().nextInt(90000) + 10000}'.substring(0, 6);
+  String _myGroupTag = '--';
+  String _myName = '';
+  UserRole _myRole = UserRole.volunteer;
 
   final List<LogEntry> log = [];
   int seenCount = 0;
@@ -42,9 +133,115 @@ class MeshService extends ChangeNotifier {
 
   DateTime? _lastSendAt;
   Timer? _cooldownTicker;
+  Timer? _presenceTicker;
+  Timer? _advertTicker;
+  Timer? _scanWatchdog;
+  AppLifecycleListener? _lifecycle;
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothAdapterState>? _adapterSub;
   bool _disposed = false;
+
+  // Everything currently being put on the air, and the rotation state that
+  // takes turns between them. See the airtime note above kAdvertSlot for
+  // why a broadcast repeats rather than firing once.
+  final List<_Broadcast> _broadcasts = [];
+  int _slotCursor = 0;
+  bool _servicingSlot = false;
+  Duration? _advertPeriod; // cadence the rotation ticker is currently running at
+  DateTime? _lastServiceRestart;
+  int _serviceRestarts = 0;
+  List<int>? _onAir; // payload the radio is advertising right now, if any
+
+  // meshId -> last-heard presence beacon. Populated purely by receiving
+  // PresencePacket broadcasts (see models.dart) — never by SOS/Lost Person
+  // traffic, and never relayed further (single-hop by construction).
+  final Map<String, _PresenceEntry> _presence = {};
+
+  /// Dindi members heard recently (within kPresenceExpiry), plus yourself.
+  int get dindiHeadcount => 1 + dindiMemberNames.length;
+
+  // Alerts received but not yet acknowledged by the person. The UI shows
+  // these one at a time as a blocking screen that can't be swiped away —
+  // an emergency alert that vanishes on its own is worse than useless. See
+  // alert_overlay.dart.
+  final List<IncomingAlert> pendingAlerts = [];
+
+  // msgId -> the name/age that arrived on a LostPersonDetailPacket. Kept
+  // separately from pendingAlerts because the detail packet can land
+  // either just before or just after the alert it belongs to.
+  final Map<int, LostPersonDetailPacket> _lostDetails = {};
+
+  // msgId -> where that alert was sent from. Same arrive-in-any-order
+  // problem as _lostDetails: the location packet can land before or after
+  // the alert it belongs to.
+  final Map<int, LocationPacket> _alertLocations = {};
+
+  // msgId -> fragments gathered so far for a text message still being
+  // reassembled. Entries are dropped once complete or once they age out
+  // (see kTextAssemblyExpiry).
+  final Map<int, _TextAssembly> _assembling = {};
+
+  // (msgId, fragmentIndex) pairs already relayed, so a fragment heard from
+  // three neighbours is only re-aired once. Alerts use the SQLite ledger for
+  // this; a fragment is far more numerous and far less important, so an
+  // in-memory set is the right trade.
+  final Set<String> _relayedFragments = {};
+
+  // Messages already reassembled in full. The sender re-airs every fragment
+  // for the whole of kTextAirtime, so the same message arrives over and
+  // over; without this each repeat rebuilds the assembly and files a fresh
+  // copy. Relying on the database insert to reject the duplicate is not
+  // enough — the conflict-ignore return value can't be trusted to
+  // distinguish "inserted" from "ignored" for a rowid-aliased primary key.
+  final Set<int> _completedTextIds = {};
+
+  /// The Dindi conversation plus any advisories, oldest first. Loaded from
+  /// SQLite at bootstrap so a restart doesn't lose the thread.
+  final List<MeshTextMessage> messages = [];
+
+  /// Messages that arrived while the chat screen wasn't open, so a badge can
+  /// show there's something to read.
+  int unreadMessages = 0;
+
+  void markMessagesRead() {
+    if (unreadMessages == 0) return;
+    unreadMessages = 0;
+    notifyListeners();
+  }
+
+  /// This phone's own position, used both to stamp outgoing alerts and to
+  /// work out how far away an incoming one is.
+  final LocationService location = LocationService();
+
+  /// Whether this phone currently knows where it is — surfaced in the UI so
+  /// someone can tell before an emergency that their SOS won't carry a
+  /// location.
+  bool get hasLocationFix => location.hasFix;
+
+  /// Marks the oldest pending alert as seen and moves to the next, if any.
+  void acknowledgeAlert() {
+    if (pendingAlerts.isEmpty) return;
+    pendingAlerts.removeAt(0);
+    notifyListeners();
+  }
+
+  /// The first name last heard for [meshId] via a presence beacon, if we
+  /// have one — lets an alert say "Priya" instead of "W7K2M9".
+  String? nameFor(String meshId) {
+    final name = _presence[meshId]?.name;
+    return (name == null || name.isEmpty) ? null : name;
+  }
+
+  /// First names of other people in your Dindi heard recently — nearby,
+  /// not necessarily still there this second. Falls back to a person's
+  /// Mesh ID if their presence beacon somehow carried an empty name.
+  List<String> get dindiMemberNames {
+    final cutoff = DateTime.now().subtract(kPresenceExpiry);
+    return _presence.entries
+        .where((e) => e.value.groupTag == _myGroupTag && e.value.lastHeard.isAfter(cutoff))
+        .map((e) => e.value.name.isEmpty ? e.key : e.value.name)
+        .toList();
+  }
 
   Duration get cooldownRemaining {
     if (_lastSendAt == null) return Duration.zero;
@@ -55,12 +252,21 @@ class MeshService extends ChangeNotifier {
 
   bool get onCooldown => cooldownRemaining > Duration.zero;
 
-  String _generateDeviceLabel() {
-    final n = Random().nextInt(900) + 100; // 3 digits, matches DEVxxx labels used in filming docs
-    return 'DEV$n';
+  /// A warkari can create/join a Dindi any time from the Home screen (see
+  /// dindi_picker.dart), not just at sign-in — this updates the tag used
+  /// for notification tiering immediately, without needing to restart
+  /// bootstrap() or the mesh scan/advertise loop.
+  void updateDindi(String groupOrId) {
+    _myGroupTag = dindiTagFor(groupOrId);
+    notifyListeners();
   }
 
-  Future<void> bootstrap() async {
+  Future<void> bootstrap(UserProfile profile) async {
+    deviceLabel = profile.meshId;
+    _myGroupTag = profile.dindiTag;
+    _myRole = profile.role;
+    _myName = profile.name.trim().split(RegExp(r'\s+')).first;
+
     // Each step is independently guarded: one subsystem failing (DB won't
     // open, notification permission denied, foreground task plugin missing
     // on this device, …) used to be able to abort the whole bootstrap
@@ -93,15 +299,156 @@ class MeshService extends ChangeNotifier {
       appendLog('Background service setup failed: $e', 'Warning');
     }
 
+    // The background relay used to be opt-in behind a switch that only the
+    // volunteer dashboard showed — so a warkari's phone had no way to turn
+    // it on at all, and every phone defaulted to "stops relaying when the
+    // screen locks". For an emergency app that default is backwards: the
+    // relay should be running unless someone deliberately turns it off.
+    try {
+      await _requestBatteryExemption();
+      await toggleBackgroundService(true);
+    } catch (e) {
+      appendLog('Could not start the background relay: $e', 'Warning');
+    }
+
+    // Started early and independently guarded: an SOS that can say WHERE
+    // is worth far more than one that can't, but a refused location
+    // permission must never stop the mesh from coming up.
+    try {
+      final ok = await location.start();
+      appendLog(
+        ok
+            ? 'Location is on — your SOS will carry where you are'
+            : 'No location access — your SOS will still send, but without a position',
+        ok ? 'Sent' : 'Warning',
+      );
+    } catch (e) {
+      appendLog('Location unavailable: $e', 'Warning');
+    }
+
     try {
       peripheralSupported = await _blePeripheral.isSupported;
     } catch (_) {
       peripheralSupported = false;
     }
+    appendLog(
+      peripheralSupported
+          ? 'This phone CAN advertise over BLE — real mesh sending is available'
+          : 'This phone CANNOT advertise over BLE — it can receive but never send',
+      peripheralSupported ? 'Sent' : 'Warning',
+    );
     notifyListeners();
+
+    // Bluetooth being off was previously only detected, never acted on —
+    // the app would sit there silently "not connected" until someone
+    // happened to flip it on themselves in system settings. This actually
+    // asks Android to turn it on (system permission dialog), same as any
+    // BLE app does on first launch.
+    try {
+      final state = await FlutterBluePlus.adapterState.first;
+      if (state != BluetoothAdapterState.on) {
+        await FlutterBluePlus.turnOn();
+      }
+    } catch (e) {
+      appendLog('Could not enable Bluetooth automatically — turn it on manually: $e', 'Warning');
+    }
 
     _watchAdapterState();
     await startScanning();
+    _startPresenceBroadcast();
+    _startScanWatchdog();
+    _startLifecycleWatch();
+  }
+
+  /// Android can quietly end a scan without telling the app — a Bluetooth
+  /// stack restart, a scan-throttle strike, or an OEM power manager pruning
+  /// background work once the screen goes off. Nothing recovered from that
+  /// except the adapter-state listener, which only fires if Bluetooth
+  /// itself toggled, so a phone could sit there deaf while still showing
+  /// "Connected to the mesh". This checks the real scanner state and
+  /// restarts it.
+  void _startScanWatchdog() {
+    _scanWatchdog?.cancel();
+    _scanWatchdog = Timer.periodic(const Duration(seconds: 20), (_) async {
+      // The foreground service is what stops Android freezing this process
+      // once the screen is off. If it dies, the app goes deaf a few seconds
+      // later and nothing else would notice — so re-assert it first.
+      try {
+        final running = await FlutterForegroundTask.isRunningService;
+        if (!running && _mayRestartService()) {
+          appendLog('Background relay had stopped — restarting it', 'Warning');
+          await toggleBackgroundService(true);
+        }
+      } catch (e) {
+        appendLog('Could not check the background relay: $e', 'Warning');
+      }
+
+      if (!bluetoothOn) return;
+      if (FlutterBluePlus.isScanningNow) {
+        if (!scanning) {
+          scanning = true;
+          notifyListeners();
+        }
+        return;
+      }
+      appendLog('Scan had stopped — restarting it', 'Warning');
+      await startScanning();
+    });
+  }
+
+  /// Rate-limits foreground-service restarts.
+  ///
+  /// Starting the service respawns its Flutter engine and background
+  /// isolate, which is disruptive to the BLE plugins running on the main
+  /// isolate. If an OEM power manager is killing the service on sight,
+  /// retrying every 20s means restarting the engine every 20s forever —
+  /// which breaks scanning outright rather than fixing anything. Back off
+  /// to once a minute and give up after a few tries; by then it isn't a
+  /// transient failure, it's a device setting the person has to change.
+  bool _mayRestartService() {
+    if (_serviceRestarts >= 5) return false;
+    final last = _lastServiceRestart;
+    if (last != null && DateTime.now().difference(last) < const Duration(minutes: 1)) {
+      return false;
+    }
+    _lastServiceRestart = DateTime.now();
+    _serviceRestarts++;
+    return true;
+  }
+
+  /// Logs (to logcat, via appendLog) the moment the app leaves the
+  /// foreground, which on a phone is almost always the screen going off.
+  /// Without this there was no way to tell "Android froze the process" from
+  /// "the packet never arrived" — the two look identical from the outside,
+  /// and they need completely different fixes. Lines after a `paused` entry
+  /// prove the isolate is still alive and listening.
+  void _startLifecycleWatch() {
+    _lifecycle?.dispose();
+    location.dispose();
+    _lifecycle = AppLifecycleListener(
+      onStateChange: (state) {
+        appendLog('App lifecycle → ${state.name}', 'Demo');
+        if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+          // Re-assert both as we go into the background rather than waiting
+          // up to 20s for the next watchdog tick — this transition is
+          // exactly when Android tears things down.
+          unawaited(_reassertBackgroundReceiving());
+        }
+      },
+    );
+  }
+
+  Future<void> _reassertBackgroundReceiving() async {
+    try {
+      if (!await FlutterForegroundTask.isRunningService && _mayRestartService()) {
+        await toggleBackgroundService(true);
+      }
+      if (bluetoothOn && !FlutterBluePlus.isScanningNow) {
+        await startScanning();
+      }
+    } catch (e) {
+      appendLog('Could not re-arm background receiving: $e', 'Warning');
+    }
   }
 
   @override
@@ -110,8 +457,16 @@ class MeshService extends ChangeNotifier {
     _scanSub?.cancel();
     _adapterSub?.cancel();
     _cooldownTicker?.cancel();
+    _presenceTicker?.cancel();
+    _advertTicker?.cancel();
+    _scanWatchdog?.cancel();
+    _lifecycle?.dispose();
     FlutterForegroundTask.removeTaskDataCallback(_onForegroundTaskData);
     FlutterBluePlus.stopScan();
+    // Advertising no longer has a hardware timeout (see _advertiseBytes),
+    // so it has to be stopped explicitly or the radio keeps broadcasting
+    // the last payload after this service is gone.
+    unawaited(_blePeripheral.stop().then<void>((_) {}, onError: (_) {}));
     super.dispose();
   }
 
@@ -130,6 +485,25 @@ class MeshService extends ChangeNotifier {
 
   void _onForegroundTaskData(Object data) {
     // Heartbeat from WariMeshTaskHandler; nothing to act on yet.
+  }
+
+  /// Asks Android to exempt WariMesh from battery optimisation. Without it
+  /// the OS freezes the process soon after the screen goes off and alerts
+  /// stop arriving — the exact scenario this app exists for. The person can
+  /// still refuse; we log it and carry on rather than blocking startup.
+  Future<void> _requestBatteryExemption() async {
+    try {
+      if (await FlutterForegroundTask.isIgnoringBatteryOptimizations) return;
+      final granted = await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+      if (!granted) {
+        appendLog(
+          'Battery optimisation is still on — Android may stop alerts arriving once the screen locks',
+          'Warning',
+        );
+      }
+    } catch (e) {
+      appendLog('Could not check battery optimisation: $e', 'Warning');
+    }
   }
 
   Future<void> _requestPermissions() async {
@@ -160,18 +534,39 @@ class MeshService extends ChangeNotifier {
     if (enabled) {
       final result = await FlutterForegroundTask.startService(
         serviceTypes: const [ForegroundServiceTypes.connectedDevice],
-        notificationTitle: 'WariMesh relay active',
-        notificationText: 'Keeping mesh scan/advertise alive in the background (experimental)',
+        notificationTitle: 'WariMesh is listening',
+        notificationText: 'Relaying SOS and missing-person alerts nearby',
         callback: startCallback,
       );
-      if (result is ServiceRequestFailure) {
+      // "Already started" is success, not failure. Treating it as a failure
+      // reported the relay as dead while it was actually running, and left
+      // the watchdog trying to restart a healthy service every 20 seconds.
+      final alreadyRunning =
+          result is ServiceRequestFailure && result.error is ServiceAlreadyStartedException;
+      if (result is ServiceRequestFailure && !alreadyRunning) {
         appendLog('Background service failed to start: ${result.error}', 'Warning');
+        backgroundServiceEnabled = false;
+        notifyListeners();
         return;
       }
+      // Ask the OS whether the service is genuinely running rather than
+      // trusting that startService() returning success means it survived.
+      // This flag is the single thing that decides whether Android freezes
+      // this process once the screen goes off — and with it, whether an
+      // SOS can be received at all — so it must reflect reality, not
+      // intent. It used to be set to `enabled` unconditionally.
+      backgroundServiceEnabled = await FlutterForegroundTask.isRunningService;
+      appendLog(
+        backgroundServiceEnabled
+            ? 'Background relay is running — this phone can receive alerts with the screen off'
+            : 'Background relay did NOT start — Android will freeze this app when the screen goes off, '
+                'and alerts will not arrive. Check battery settings for WariMesh.',
+        backgroundServiceEnabled ? 'Sent' : 'Warning',
+      );
     } else {
       await FlutterForegroundTask.stopService();
+      backgroundServiceEnabled = false;
     }
-    backgroundServiceEnabled = enabled;
     notifyListeners();
   }
 
@@ -193,28 +588,513 @@ class MeshService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Broadcasts "I exist, here's my name" every kPresenceInterval so nearby
+  /// Dindi members show up in the Home screen's headcount. Deliberately
+  /// independent of the SOS send cooldown and the demo-mode narration —
+  /// PresencePacket is a completely separate wire format from the ALERT
+  /// packet (see models.dart) and must keep going regardless of whether an
+  /// alert was just sent.
+  void _startPresenceBroadcast() {
+    _presenceTicker?.cancel();
+    _presenceTicker = Timer.periodic(kPresenceInterval, (_) => _broadcastPresence());
+    _broadcastPresence(); // don't wait a full interval for the first beacon
+  }
+
+  void _broadcastPresence() {
+    if (!peripheralSupported || !bluetoothOn) return; // no real radio to send on — nothing to do
+    // Lowest priority: a headcount beacon may never cost an alert airtime.
+    // Its airtime runs slightly past the next tick so the beacon stays in
+    // the rotation continuously rather than blinking out between ticks.
+    final packet = PresencePacket(meshId: deviceLabel, groupTag: _myGroupTag, name: _myName);
+    _queueBroadcast('presence', packet.encode(), kPresenceInterval * 2, priority: 0);
+  }
+
+  /// Registers [bytes] to be repeatedly put on the air for [airtime].
+  ///
+  /// Re-registering the same [key] refreshes that payload's airtime in
+  /// place — hearing the same relayed alert twice extends how long we
+  /// carry it rather than queueing it twice.
+  void _queueBroadcast(
+    String key,
+    Uint8List bytes,
+    Duration airtime, {
+    int priority = kPriorityPresence,
+    Duration slot = kAdvertSlot,
+  }) {
+    if (!peripheralSupported || !bluetoothOn) return;
+    _broadcasts.removeWhere((b) => b.key == key);
+    _broadcasts.add(_Broadcast(key, bytes, DateTime.now().add(airtime), priority, slot));
+    _startAdvertLoop(slot);
+    unawaited(_serviceAdvertSlot()); // don't make an SOS wait up to a full slot
+  }
+
+  /// (Re)starts the rotation ticker at [slot]. The period follows whatever
+  /// is currently on the air, so text fragments tick every couple of seconds
+  /// while alerts keep the slower, gentler cadence.
+  void _startAdvertLoop(Duration slot) {
+    if (_advertTicker != null && _advertPeriod == slot) return;
+    _advertTicker?.cancel();
+    _advertPeriod = slot;
+    _advertTicker = Timer.periodic(slot, (_) => unawaited(_serviceAdvertSlot()));
+  }
+
+  /// Gives the radio to one registered broadcast for this slot, dropping
+  /// anything whose airtime has run out. This is the single place that
+  /// touches the advertiser, which is what stops a 15s presence beacon
+  /// from calling stop() in the middle of an SOS the way it used to.
+  Future<void> _serviceAdvertSlot() async {
+    // The slot ticker and an immediate _queueBroadcast can land at the same
+    // moment; two overlapping stop/start pairs on one radio is how you end
+    // up advertising nothing at all. Whoever is second just waits for the
+    // next slot.
+    if (_servicingSlot) return;
+    _servicingSlot = true;
+    try {
+      await _serviceAdvertSlotInner();
+    } finally {
+      _servicingSlot = false;
+    }
+  }
+
+  Future<void> _serviceAdvertSlotInner() async {
+    _broadcasts.removeWhere((b) => b.expiresAt.isBefore(DateTime.now()));
+
+    if (_broadcasts.isEmpty) {
+      _advertTicker?.cancel();
+      _advertTicker = null;
+      _advertPeriod = null;
+      if (_onAir != null) {
+        _onAir = null;
+        try {
+          await _blePeripheral.stop();
+        } catch (_) {
+          // Nothing on the air to stop is not a failure worth logging.
+        }
+      }
+      return;
+    }
+
+    // Only the most important tier gets the radio; nothing below it is
+    // rotated in at all. While an alert is live the presence beacon simply
+    // goes quiet for a minute — a headcount is worth nothing next to an
+    // SOS, and every payload we interleave costs a stop/start cycle.
+    //
+    // That cost is the reason for this rule rather than fairness. Restarting
+    // the advertiser every slot is what wedges Android's BLE stack:
+    // repeated stop/start at high TX power runs it out of advertiser
+    // instances (ADVERTISE_FAILED_TOO_MANY_ADVERTISERS) and it then stops
+    // transmitting altogether until Bluetooth is toggled — silently, on
+    // every phone running it. An SOS on its own now claims the radio once
+    // and holds it for the full 60 seconds, which is both gentler on the
+    // stack and strictly better for a screen-off receiver.
+    final topPriority = _broadcasts.map((b) => b.priority).reduce(max);
+    final live = _broadcasts.where((b) => b.priority == topPriority).toList();
+    final chosen = live[_slotCursor++ % live.length];
+
+    // Follow the live tier's cadence: a fragmented message must not crawl at
+    // the alert slot, and an alert must not churn at the text slot.
+    _startAdvertLoop(chosen.slot);
+
+    // Re-advertising a payload that's already on the air would mean a
+    // stop/start gap for no gain — the whole point is continuous airtime.
+    if (_onAir != null && listEquals(_onAir, chosen.bytes)) return;
+
+    // Only claim it's on the air if the radio actually accepted it. Setting
+    // this optimistically meant a failed start looked like a live broadcast,
+    // so the check above would skip it every slot from then on and the alert
+    // would never get retried — the exact way a wedged advertiser turns into
+    // permanent silence.
+    _onAir = await _advertiseBytes(chosen.bytes) ? chosen.bytes : null;
+  }
+
   void _onScanResults(List<ScanResult> results) {
     for (final r in results) {
       final data = r.advertisementData.manufacturerData[kManufacturerId];
-      if (data == null) continue;
+      if (data == null || data.isEmpty) continue;
+      // Raw sighting, before any decode/dedup — the ground truth for "is
+      // this phone's radio hearing the other phone at all?".
+      debugPrint('WariMesh[RAW] rssi=${r.rssi} type=${data[0]} len=${data.length}');
+
+      // Two completely separate wire formats share the manufacturer-data
+      // slot — the byte-0 packetType says which. See the note on
+      // kPresencePacketType in models.dart for why presence isn't just
+      // another MeshPacket category.
+      if (data[0] == kPresencePacketType) {
+        final presence = PresencePacket.decode(data);
+        if (presence != null) _handlePresence(presence);
+        continue;
+      }
+
+      if (data[0] == kTextHeadPacketType) {
+        final head = TextHeadPacket.decode(data);
+        if (head != null) unawaited(_handleTextHead(head));
+        continue;
+      }
+
+      if (data[0] == kTextPartPacketType) {
+        final part = TextPartPacket.decode(data);
+        if (part != null) unawaited(_handleTextPart(part));
+        continue;
+      }
+
+      if (data[0] == kLocationPacketType) {
+        final loc = LocationPacket.decode(data);
+        if (loc != null) _handleLocation(loc);
+        continue;
+      }
+
+      if (data[0] == kLostDetailPacketType) {
+        final detail = LostPersonDetailPacket.decode(data);
+        if (detail != null) _handleLostDetail(detail);
+        continue;
+      }
+
       final packet = MeshPacket.decode(data);
       if (packet == null) continue;
       unawaited(_handleReceivedPacket(packet));
     }
   }
 
+  void _handlePresence(PresencePacket packet) {
+    if (packet.meshId == deviceLabel) return; // our own beacon bouncing back
+    _presence[packet.meshId] = _PresenceEntry(packet.groupTag, packet.name, DateTime.now());
+    notifyListeners();
+  }
+
+  void _handleLocation(LocationPacket loc) {
+    _alertLocations[loc.msgId] = loc;
+    appendLog(
+      'Position received for alert #${loc.msgId}',
+      'Received',
+    );
+
+    // The alert and its position travel as separate packets that take turns
+    // on the air, so the alert almost always lands first — meaning the
+    // notification has already been posted by the time we learn where the
+    // sender is. Filling in the open dialog is not enough: the lock screen
+    // is where most people will actually see this, and a notification that
+    // says "needs help" when we know it's 240 m north-east is withholding
+    // the one fact that makes it actionable. So the notification is
+    // re-posted with the distance as soon as we have it.
+    var changed = false;
+    for (final alert in pendingAlerts) {
+      if (alert.packet.msgId == loc.msgId && !alert.hasLocation) {
+        _applyLocation(alert, loc);
+        changed = true;
+        unawaited(_repostWithLocation(alert));
+      }
+    }
+    if (changed) notifyListeners();
+  }
+
+  /// Re-posts an already-shown notification, now carrying the distance.
+  /// Same notification id, so Android replaces the existing one rather than
+  /// stacking a second alert for the same event.
+  Future<void> _repostWithLocation(IncomingAlert alert) async {
+    try {
+      await NotificationService.showAlertReceived(
+        alert.packet,
+        senderName: alert.senderName,
+        lostName: alert.lostName,
+        lostAge: alert.lostAge,
+        distanceLabel: alert.distanceLabel,
+        directionLabel: alert.directionLabel,
+        isUpdate: true,
+      );
+      appendLog(
+        alert.distanceLabel == null
+            ? 'Position added to the alert (no distance — this phone has no fix of its own)'
+            : 'Alert updated: ${alert.distanceLabel}, to your ${alert.directionLabel}',
+        'Received',
+      );
+    } catch (e) {
+      appendLog('Could not update the alert with its position: $e', 'Warning');
+    }
+  }
+
+  /// Stamps an alert with the sender's position, plus how far and which way
+  /// that is from here. Distance stays null when this phone has no fix of
+  /// its own — we still show the raw coordinates in that case.
+  void _applyLocation(IncomingAlert alert, LocationPacket loc) {
+    alert.senderLatitude = loc.latitude;
+    alert.senderLongitude = loc.longitude;
+    final me = location.lastKnown;
+    if (me == null) return;
+    alert.distanceMetres = LocationService.distanceBetween(
+      me.latitude, me.longitude, loc.latitude, loc.longitude);
+    alert.bearingDegrees = LocationService.bearingBetween(
+      me.latitude, me.longitude, loc.latitude, loc.longitude);
+  }
+
+    // ---------------------------------------------------------------------
+  // Text messages — Dindi chat and volunteer advisories.
+  // ---------------------------------------------------------------------
+
+  /// Sends [body] as a Dindi chat message, or as an advisory to everyone in
+  /// range when [announcement] is true. Returns false if there was nothing
+  /// to send or the radio can't transmit.
+  ///
+  /// Unlike an alert there is no cooldown: rate-limiting a conversation
+  /// would make it unusable, and text already yields the radio to any alert.
+  Future<bool> sendText(String body, {bool announcement = false}) async {
+    final text = body.trim();
+    if (text.isEmpty) return false;
+
+    final msgId = Random().nextInt(0xFFFFFFFF);
+    final kind = announcement ? kTextKindAnnouncement : kTextKindChat;
+    final fragments = fragmentText(
+      msgId: msgId,
+      ttl: kDefaultTtl,
+      kind: kind,
+      groupTag: _myGroupTag,
+      senderLabel: deviceLabel,
+      body: text,
+    );
+
+    final message = MeshTextMessage(
+      msgId: msgId,
+      kind: kind,
+      groupTag: _myGroupTag,
+      senderLabel: deviceLabel,
+      senderName: _myName,
+      body: asciiSafe(text).trim(),
+      createdAt: DateTime.now(),
+      outgoing: true,
+    );
+    await _storeMessage(message, countUnread: false);
+
+    if (!peripheralSupported || !bluetoothOn) {
+      appendLog('Message saved but not broadcast — this phone cannot transmit right now', 'Warning');
+      return false;
+    }
+
+    _airText(fragments.head, fragments.parts, kTextAirtime);
+    appendLog(
+      announcement
+          ? 'Advisory sent to everyone in range (${fragments.parts.length + 1} fragments)'
+          : 'Message sent to your Dindi (${fragments.parts.length + 1} fragments)',
+      'Sent',
+    );
+    return true;
+  }
+
+  /// Puts a whole message on the air. Every fragment shares the text tier,
+  /// so they rotate among themselves and repeat for the full airtime —
+  /// a receiver that misses fragment 3 on the first pass catches it later.
+  void _airText(TextHeadPacket head, List<TextPartPacket> parts, Duration airtime) {
+    _queueBroadcast('txt:${head.msgId}:0', head.encode(), airtime,
+        priority: kPriorityText, slot: kTextSlot);
+    for (final part in parts) {
+      _queueBroadcast('txt:${head.msgId}:${part.index}', part.encode(), airtime,
+          priority: kPriorityText, slot: kTextSlot);
+    }
+  }
+
+  Future<void> _handleTextHead(TextHeadPacket head) async {
+    if (head.senderLabel == deviceLabel) return; // our own message echoing back
+
+    // Relay regardless of whether we've already read it — a neighbour
+    // further out may still be waiting for this fragment.
+    _relayFragment('${head.msgId}:0', head.ttl, () => head.relayed().encode());
+    if (_completedTextIds.contains(head.msgId)) return;
+
+    final assembly = _assembling.putIfAbsent(head.msgId, () => _TextAssembly(head.msgId));
+    assembly.head = head;
+    assembly.total = head.fragTotal;
+    assembly.chunks[0] = head.chunk;
+    await _completeIfWhole(assembly);
+  }
+
+  Future<void> _handleTextPart(TextPartPacket part) async {
+    // A part can arrive before its head — we don't know the sender or the
+    // fragment count yet, so hold it until the head turns up.
+    _relayFragment('${part.msgId}:${part.index}', part.ttl, () => part.relayed().encode());
+    if (_completedTextIds.contains(part.msgId)) return;
+
+    final assembly = _assembling.putIfAbsent(part.msgId, () => _TextAssembly(part.msgId));
+    assembly.chunks[part.index] = part.chunk;
+    await _completeIfWhole(assembly);
+  }
+
+  /// Re-airs one fragment if it still has hops left and we have not already
+  /// passed this exact fragment on.
+  void _relayFragment(String key, int ttl, Uint8List Function() encode) {
+    if (ttl <= 0) return;
+    if (!_relayedFragments.add(key)) return;
+    // Bounded so a long conversation cannot grow this without limit.
+    if (_relayedFragments.length > 500) {
+      _relayedFragments.remove(_relayedFragments.first);
+    }
+    _queueBroadcast('txt:$key', encode(), kTextAirtime,
+        priority: kPriorityText, slot: kTextSlot);
+  }
+
+  /// Joins the fragments once they are all present and files the result.
+  Future<void> _completeIfWhole(_TextAssembly assembly) async {
+    _assembling.removeWhere((_, a) =>
+        DateTime.now().difference(a.startedAt) > kTextAssemblyExpiry && a != assembly);
+
+    final head = assembly.head;
+    final total = assembly.total;
+    if (head == null || total == null) return; // head has not arrived yet
+    for (var i = 0; i < total; i++) {
+      if (!assembly.chunks.containsKey(i)) return; // still missing a fragment
+    }
+
+    final body = [for (var i = 0; i < total; i++) assembly.chunks[i]!].join().trimRight();
+    _assembling.remove(assembly.msgId);
+
+    // Claim it before filing so a fragment landing mid-await can't produce
+    // a second copy.
+    if (!_completedTextIds.add(assembly.msgId)) return;
+    if (_completedTextIds.length > 500) {
+      _completedTextIds.remove(_completedTextIds.first);
+    }
+
+    await _storeMessage(
+      MeshTextMessage(
+        msgId: assembly.msgId,
+        kind: head.kind,
+        groupTag: head.groupTag,
+        senderLabel: head.senderLabel,
+        senderName: nameFor(head.senderLabel),
+        body: body,
+        createdAt: DateTime.now(),
+        outgoing: false,
+      ),
+      countUnread: true,
+    );
+  }
+
+  /// Files a message, in SQLite and in memory. Silently does nothing if the
+  /// msgId is already known — the same message reaches us repeatedly as
+  /// neighbours relay it, and a conversation must not fill with duplicates.
+  Future<void> _storeMessage(MeshTextMessage message, {required bool countUnread}) async {
+    if (messages.any((m) => m.msgId == message.msgId)) return;
+
+    var isNew = true;
+    try {
+      isNew = await MessagesDb.insertIfNew(message);
+    } catch (e) {
+      // No database — keep it for this session at least, rather than
+      // dropping what someone just said.
+      isNew = !messages.any((m) => m.msgId == message.msgId);
+      appendLog('Message not saved to this phone: $e', 'Warning');
+    }
+    if (!isNew) return;
+
+    // Shown only if it is for our Dindi, or it is an advisory for everyone.
+    // Note this decides DISPLAY, never relay: every phone passes on every
+    // fragment, exactly as it does for alerts, so reach never depends on
+    // group membership.
+    final forUs = message.groupTag == _myGroupTag || message.isAnnouncement;
+    if (!forUs) return;
+
+    messages.add(message);
+    if (countUnread && !message.outgoing) unreadMessages++;
+
+    if (message.isAnnouncement && !message.outgoing) {
+      // An advisory is the reason a volunteer sent it — route changes and
+      // closed water points are no use sitting unread in a tab.
+      try {
+        await NotificationService.showAdvisory(message);
+      } catch (e) {
+        appendLog('Could not show the advisory notification: $e', 'Warning');
+      }
+    }
+
+    appendLog(
+      message.outgoing ? 'You: ${message.body}' : '${message.displayName}: ${message.body}',
+      message.isAnnouncement ? 'Demo' : 'Received',
+    );
+    notifyListeners();
+  }
+
+  /// Loads this Dindi's conversation from SQLite at startup.
+  Future<void> loadMessages() async {
+    try {
+      final stored = await MessagesDb.forGroup(_myGroupTag);
+      messages
+        ..clear()
+        ..addAll(stored);
+      notifyListeners();
+    } catch (e) {
+      appendLog('Could not load earlier messages: $e', 'Warning');
+    }
+  }
+
+  void _handleLostDetail(LostPersonDetailPacket detail) {
+    _lostDetails[detail.msgId] = detail;
+    // The detail can arrive after its alert is already on screen — fill it
+    // in so the open alert gains the name instead of staying generic.
+    var changed = false;
+    for (final alert in pendingAlerts) {
+      if (alert.packet.msgId == detail.msgId && alert.lostName == null) {
+        alert.lostName = detail.name;
+        alert.lostAge = detail.age;
+        changed = true;
+      }
+    }
+    if (changed) notifyListeners();
+  }
+
   Future<void> _handleReceivedPacket(MeshPacket packet) async {
     if (packet.senderLabel == deviceLabel) return; // ignore our own advertisement bouncing back
+
     final alreadySeen = await SeenMessagesDb.hasSeen(packet.msgId);
     if (alreadySeen) return; // dedup — also the loop-prevention mechanism
 
     await SeenMessagesDb.markSeen(packet);
     await refreshSeenCount();
+
+    // Notification tiering: every phone relays every packet regardless
+    // (reach must never depend on group membership), but a loud, buzzing
+    // notification is only worth interrupting someone for if it's their
+    // own Dindi's business or they're a volunteer — the responder tier for
+    // everyone else's alerts too. Anyone outside both still gets the quiet
+    // activity-log line below, just not the heads-up notification.
+    final isMyDindi = packet.groupTag == _myGroupTag;
+    final isResponder = _myRole == UserRole.volunteer;
+    // An SOS is never tiered down. Tiering exists so a warkari isn't
+    // interrupted by every Lost Person report in a crowd of thousands —
+    // but a warkari who hasn't joined a Dindi yet carries the tag '--',
+    // which matches nobody, so under the old rule their phone stayed
+    // completely silent for a real SOS from someone standing next to
+    // them. Whoever is nearest is who can help; group membership must not
+    // decide whether they're told.
+    final prominent = packet.category == kCategorySos || isMyDindi || isResponder;
+
     appendLog(
-      'Received ${categoryLabel(packet.category)} from ${packet.senderLabel} (TTL ${packet.ttl})',
+      'Received ${categoryLabel(packet.category)} from ${packet.senderLabel}'
+      '${isMyDindi ? ' (your Dindi)' : ''} (TTL ${packet.ttl})',
       'Received',
     );
-    await NotificationService.showAlertReceived(packet);
+    if (prominent) {
+      // Two channels on purpose: the system notification is what reaches
+      // someone whose phone is in their pocket, and the in-app alert is
+      // what they see when they pull it out — it stays until acknowledged.
+      final detail = _lostDetails[packet.msgId];
+      final alert = IncomingAlert(
+        packet: packet,
+        senderName: nameFor(packet.senderLabel),
+        receivedAt: DateTime.now(),
+        lostName: detail?.name,
+        lostAge: detail?.age,
+      );
+      final loc = _alertLocations[packet.msgId];
+      if (loc != null) _applyLocation(alert, loc);
+
+      await NotificationService.showAlertReceived(
+        packet,
+        senderName: alert.senderName,
+        lostName: detail?.name,
+        lostAge: detail?.age,
+        distanceLabel: alert.distanceLabel,
+        directionLabel: alert.directionLabel,
+      );
+      pendingAlerts.add(alert);
+      notifyListeners();
+    }
 
     if (packet.ttl > 0) {
       // Random jitter before relaying so nearby phones that all heard the
@@ -222,31 +1102,58 @@ class MeshService extends ChangeNotifier {
       final jitterMs = 300 + Random().nextInt(501); // 300–800ms
       await Future.delayed(Duration(milliseconds: jitterMs));
       final relayed = packet.relayed();
-      await _advertise(relayed);
+      // Carried for kRelayAirtime rather than re-advertised once: the
+      // phone we're relaying to may well have its screen off, and a
+      // single burst is exactly what it would miss. This is also what
+      // lets someone who walks into range ten seconds late still hear it.
+      _queueBroadcast('alert:${relayed.msgId}', relayed.encode(), kRelayAirtime, priority: 2);
+      final loc = _alertLocations[relayed.msgId];
+      if (loc != null) {
+        // The position has to travel as far as the alert does, or a phone
+        // two hops out learns someone needs help but not where.
+        _queueBroadcast('loc:${relayed.msgId}', loc.encode(), kRelayAirtime, priority: 2);
+      }
+      final detail = _lostDetails[relayed.msgId];
+      if (detail != null) {
+          // Same priority as the alert, not lower: under the top-tier rule
+        // in _serviceAdvertSlotInner a lower priority would never air at
+        // all, and an alert without its name is barely actionable.
+        _queueBroadcast('detail:${relayed.msgId}', detail.encode(), kRelayAirtime, priority: 2);
+      }
       appendLog('Relayed via $deviceLabel (TTL now ${relayed.ttl})', 'Relayed');
     } else {
       appendLog('Final hop reached $deviceLabel — not relayed further', 'Final hop');
     }
   }
 
-  Future<void> _advertise(MeshPacket packet) async {
+  /// Puts one payload on the air. Only [_serviceAdvertSlot] calls this —
+  /// go through [_queueBroadcast] instead, so airtime is scheduled rather
+  /// than grabbed.
+  Future<bool> _advertiseBytes(List<int> bytes) async {
     try {
       if (await _blePeripheral.isAdvertising) {
         await _blePeripheral.stop();
       }
       final data = AdvertiseData(
         manufacturerId: kManufacturerId,
-        manufacturerData: packet.encode(),
+        manufacturerData: Uint8List.fromList(bytes),
       );
       final settings = AdvertiseSettings(
         advertiseMode: AdvertiseMode.advertiseModeLowLatency,
         txPowerLevel: AdvertiseTxPower.advertiseTxPowerHigh,
         connectable: false,
-        timeout: 3000, // ~3s burst — long enough for a nearby scanner to catch it, short enough not to hog the radio
+        // No hardware timeout: how long a payload stays on the air is now
+        // decided by its airtime in [_broadcasts], and [_serviceAdvertSlot]
+        // stops the radio when nothing is left. A 3s hardware timeout used
+        // to end an alert permanently after one burst — see the airtime
+        // note above kAdvertSlot for why that lost screen-off receivers.
+        timeout: 0,
       );
       await _blePeripheral.start(advertiseData: data, advertiseSettings: settings);
+      return true;
     } catch (e) {
       appendLog('Advertise failed: $e', 'Warning');
+      return false;
     }
   }
 
@@ -254,7 +1161,11 @@ class MeshService extends ChangeNotifier {
   /// (cooldown). Real BLE advertising is attempted whenever the device
   /// supports it; Demo Mode additionally narrates a simulated relay so the
   /// activity feed stays convincing even solo on one phone.
-  Future<MeshPacket?> sendAlert(int category) async {
+  ///
+  /// For a Lost Person alert, pass [lostName]/[lostAge] — they're
+  /// broadcast as a separate detail packet so receiving phones can show
+  /// who to look for rather than a nameless "someone is missing".
+  Future<MeshPacket?> sendAlert(int category, {String? lostName, String? lostAge}) async {
     if (onCooldown) {
       appendLog(
         'Send blocked — wait ${cooldownRemaining.inSeconds + 1}s (10s rate limit)',
@@ -271,6 +1182,7 @@ class MeshService extends ChangeNotifier {
       msgId: Random().nextInt(0xFFFFFFFF),
       category: category,
       senderLabel: deviceLabel,
+      groupTag: _myGroupTag,
     );
     // Mark our own send as seen so a stray echo of our own advertisement
     // isn't treated as a fresh incoming alert.
@@ -278,7 +1190,10 @@ class MeshService extends ChangeNotifier {
     await refreshSeenCount();
 
     if (peripheralSupported && bluetoothOn) {
-      await _advertise(packet);
+      final detail = (lostName == null || lostName.isEmpty)
+          ? null
+          : LostPersonDetailPacket(msgId: packet.msgId, name: lostName, age: lostAge ?? '');
+      _broadcastAlert(packet, detail);
     } else if (!peripheralSupported) {
       appendLog('This device cannot advertise over real BLE (peripheral unsupported) — using Demo Mode', 'Warning');
     } else if (!bluetoothOn) {
@@ -295,6 +1210,62 @@ class MeshService extends ChangeNotifier {
     }
 
     return packet;
+  }
+
+  /// Registers an alert (and its detail packet, when there is one) for a
+  /// full minute of airtime. There's still only one BLE advertiser, so the
+  /// two payloads take turns — but now via the shared rotation in
+  /// [_serviceAdvertSlot], which is what keeps the 15s presence beacon from
+  /// cutting the alert short and keeps the alert repeating long enough for
+  /// a phone whose screen is off to actually catch it.
+  void _broadcastAlert(MeshPacket packet, LostPersonDetailPacket? detail) {
+    _queueBroadcast('alert:${packet.msgId}', packet.encode(), kAlertAirtime, priority: 2);
+    if (detail != null) {
+      _queueBroadcast('detail:${packet.msgId}', detail.encode(), kAlertAirtime, priority: 2);
+    }
+    _broadcastLocationFor(packet.msgId);
+  }
+
+  /// Puts this phone's position on the air alongside an alert.
+  ///
+  /// The cached fix goes out immediately — an emergency button must never
+  /// block on GPS, which can take half a minute to acquire cold. A fresh
+  /// fix is then requested in the background and, if it lands while the
+  /// alert is still on the air, replaces the cached one under the same
+  /// broadcast key. Worst case the receiver gets a slightly stale position;
+  /// that is enormously better than no position, and better than an SOS
+  /// that took 30 seconds to send.
+  void _broadcastLocationFor(int msgId) {
+    final cached = location.lastKnown;
+    if (cached != null) {
+      final loc = LocationPacket(
+        msgId: msgId,
+        latitude: cached.latitude,
+        longitude: cached.longitude,
+      );
+      _alertLocations[msgId] = loc;
+      _queueBroadcast('loc:$msgId', loc.encode(), kAlertAirtime, priority: 2);
+      appendLog('Your position is going out with this alert', 'Sent');
+    } else {
+      appendLog('No location fix yet — this alert goes out without a position', 'Warning');
+    }
+
+    unawaited(() async {
+      final fresh = await location.currentFix();
+      if (fresh == null || _disposed) return;
+      final loc = LocationPacket(
+        msgId: msgId,
+        latitude: fresh.latitude,
+        longitude: fresh.longitude,
+      );
+      _alertLocations[msgId] = loc;
+      // Same key, so this replaces the cached position rather than
+      // competing with it for airtime.
+      _queueBroadcast('loc:$msgId', loc.encode(), kAlertAirtime, priority: 2);
+      if (cached == null) {
+        appendLog('Got a location fix — now sending it with your alert', 'Sent');
+      }
+    }());
   }
 
   void _startCooldownTicker() {
@@ -333,7 +1304,34 @@ class MeshService extends ChangeNotifier {
       msgId: Random().nextInt(0xFFFFFFFF),
       category: category,
       senderLabel: fakeSender,
+      // Tagged as our own Dindi so the demo convincingly shows the loud,
+      // prominent notification path rather than the quiet-log tier.
+      groupTag: _myGroupTag,
     );
+    // A simulated Lost Person alert gets simulated details too, so Demo
+    // Mode exercises the same full alert screen a real one produces
+    // instead of a stripped-down version of it.
+    if (category == kCategoryLostPerson) {
+      _lostDetails[packet.msgId] = LostPersonDetailPacket(
+        msgId: packet.msgId,
+        name: 'Aarav',
+        age: '8',
+      );
+    }
+    // Give the simulated alert a position a couple of hundred metres away
+    // so Demo Mode exercises the same distance/direction path a real alert
+    // produces, rather than a stripped-down version of it. Offsets are
+    // applied to this phone's own fix, so the demo reads as somewhere
+    // genuinely nearby; with no fix we simply skip it, exactly as a real
+    // alert from a phone without GPS would.
+    final me = location.lastKnown;
+    if (me != null) {
+      _alertLocations[packet.msgId] = LocationPacket(
+        msgId: packet.msgId,
+        latitude: me.latitude + 0.0018,
+        longitude: me.longitude + 0.0011,
+      );
+    }
     appendLog('Simulating an incoming alert from $fakeSender (demo)', 'Demo');
     await _handleReceivedPacket(packet);
   }
@@ -344,6 +1342,11 @@ class MeshService extends ChangeNotifier {
   }
 
   void appendLog(String text, String kind) {
+    // Mirrored to logcat so the mesh can be diagnosed on a real device
+    // (`adb logcat | grep WariMesh`) — the in-app feed is invisible once
+    // the screen is off, which is exactly when the interesting failures
+    // happen.
+    debugPrint('WariMesh[$kind] $text');
     log.insert(0, LogEntry(text, kind));
     if (log.length > 200) log.removeLast();
     notifyListeners();

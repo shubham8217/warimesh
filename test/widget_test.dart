@@ -85,6 +85,15 @@ void main() {
     expect(find.text('Warkari sign-in'), findsOneWidget);
     await tester.enterText(find.widgetWithText(TextFormField, 'Full name'), 'Test Warkari');
     await tester.enterText(find.widgetWithText(TextFormField, 'Phone number'), '555-0200');
+    // The sign-in form scrolls (the warkari flow adds the Create/Join Dindi
+    // picker, which can push "Sign in" below the fold) — ListView only
+    // inflates children near the viewport, same as ListView.builder, so the
+    // button must be scrolled into view before it can be found or tapped.
+    await tester.scrollUntilVisible(
+      find.widgetWithText(FilledButton, 'Sign in'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.runAsync(() async {
       await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
       await Future.delayed(const Duration(milliseconds: 900));

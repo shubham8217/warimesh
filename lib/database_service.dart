@@ -16,7 +16,7 @@ import 'models.dart';
 
 class AppDatabase {
   static Database? _db;
-  static const int _version = 4;
+  static const int _version = 7;
 
   static Future<Database> get instance async {
     if (_db != null) return _db!;
@@ -29,6 +29,8 @@ class AppDatabase {
         await _createSeenMessages(db);
         await _createLostReports(db);
         await _createVolunteerProfile(db);
+        await _createKnownDindis(db);
+        await _createMessages(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -42,6 +44,20 @@ class AppDatabase {
           // models.dart) — a pre-existing row is someone who signed in
           // before roles existed, i.e. a volunteer.
           await db.execute("ALTER TABLE volunteer_profile ADD COLUMN role TEXT NOT NULL DEFAULT 'volunteer'");
+        }
+        if (oldVersion < 6) {
+          await _createKnownDindis(db);
+        }
+        if (oldVersion < 7) {
+          await _createMessages(db);
+        }
+        if (oldVersion < 5) {
+          // Persistent Mesh ID (see generateMeshId() in models.dart). Left
+          // NULL for existing rows on purpose — UserProfile.fromMap()
+          // generates one on first read after upgrade and UserDb.current()
+          // persists it immediately, rather than backfilling here with no
+          // access to the role-aware generator.
+          await db.execute('ALTER TABLE volunteer_profile ADD COLUMN mesh_id TEXT');
         }
       },
     );
@@ -69,7 +85,44 @@ class AppDatabase {
         phone TEXT NOT NULL,
         role TEXT NOT NULL DEFAULT 'volunteer',
         volunteer_id TEXT NOT NULL,
+        mesh_id TEXT,
         logged_in_at INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  // Dindi names this phone has created or joined. There's no server, so
+  // this is a per-phone memory only — it makes "Create" vs "Join" a real,
+  // structured choice instead of a free-text field, and lets a phone used
+  // to register several people (e.g. a camp organizer's phone) offer past
+  // names back for reselection instead of re-typing. A true cross-phone
+  // Dindi directory needs the cloud sync bridge (still unbuilt) — Join
+  // here can only offer what THIS phone has already seen.
+  static Future<void> _createKnownDindis(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS known_dindis (
+        name TEXT PRIMARY KEY,
+        tag TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  // Dindi chat and volunteer advisories, reassembled from mesh fragments
+  // (see TextHeadPacket in models.dart). msg_id is the primary key, which
+  // doubles as dedup: hearing the same message relayed back from three
+  // neighbours must not produce three copies in the conversation.
+  static Future<void> _createMessages(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS messages (
+        msg_id INTEGER PRIMARY KEY,
+        kind INTEGER NOT NULL,
+        group_tag TEXT NOT NULL,
+        sender_label TEXT NOT NULL,
+        sender_name TEXT,
+        body TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        outgoing INTEGER NOT NULL DEFAULT 0
       )
     ''');
   }
@@ -203,11 +256,85 @@ class UserDb {
     final db = await AppDatabase.instance;
     final rows = await db.query('volunteer_profile', where: 'id = 1', limit: 1);
     if (rows.isEmpty) return null;
-    return UserProfile.fromMap(rows.first);
+    final profile = UserProfile.fromMap(rows.first);
+    // A pre-existing row from before Mesh IDs existed gets one generated on
+    // read (see UserProfile.fromMap) — persist it immediately so it's
+    // permanent from here on, not regenerated on the next launch.
+    if (rows.first['mesh_id'] == null) {
+      await save(profile);
+    }
+    return profile;
   }
 
   static Future<void> clear() async {
     final db = await AppDatabase.instance;
     await db.delete('volunteer_profile', where: 'id = 1');
+  }
+}
+
+// ===================== known_dindis =====================
+//
+// This phone's own memory of Dindi names it has created or joined — see
+// the note on _createKnownDindis above for why this can't be a real
+// cross-phone directory yet.
+
+class KnownDindisDb {
+  static Future<void> remember(String name) async {
+    final db = await AppDatabase.instance;
+    await db.insert(
+      'known_dindis',
+      {
+        'name': name,
+        'tag': dindiTagFor(name),
+        'created_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  static Future<List<String>> all() async {
+    final db = await AppDatabase.instance;
+    final rows = await db.query('known_dindis', orderBy: 'created_at DESC');
+    return rows.map((r) => r['name'] as String).toList();
+  }
+}
+
+
+// ===================== messages =====================
+//
+// One row per text message this phone has sent or fully reassembled. See
+// the note on _createMessages for why msg_id is the primary key.
+
+class MessagesDb {
+  /// Stores a message, ignoring it if that msgId is already known — the
+  /// same message arrives repeatedly as neighbours relay it.
+  /// Returns true if this was genuinely new.
+  static Future<bool> insertIfNew(MeshTextMessage message) async {
+    final db = await AppDatabase.instance;
+    final id = await db.insert(
+      'messages',
+      message.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    return id != 0;
+  }
+
+  /// Conversation for one Dindi, plus every announcement regardless of
+  /// group — an advisory is meant for everyone in range, so it appears in
+  /// whichever Dindi's thread the person is reading.
+  static Future<List<MeshTextMessage>> forGroup(String groupTag) async {
+    final db = await AppDatabase.instance;
+    final rows = await db.query(
+      'messages',
+      where: 'group_tag = ? OR kind = ?',
+      whereArgs: [groupTag, kTextKindAnnouncement],
+      orderBy: 'created_at ASC',
+    );
+    return rows.map(MeshTextMessage.fromMap).toList();
+  }
+
+  static Future<void> clear() async {
+    final db = await AppDatabase.instance;
+    await db.delete('messages');
   }
 }

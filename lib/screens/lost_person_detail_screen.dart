@@ -23,7 +23,11 @@ class _LostPersonDetailScreenState extends State<LostPersonDetailScreen> {
 
   Future<void> _rebroadcast() async {
     setState(() => _busy = true);
-    final packet = await widget.mesh.sendAlert(kCategoryLostPerson);
+    final packet = await widget.mesh.sendAlert(
+      kCategoryLostPerson,
+      lostName: _report.name,
+      lostAge: _report.age,
+    );
     if (packet != null && _report.id != null) {
       await LostReportsDb.setBroadcast(_report.id!, packet.msgId, DateTime.now());
       setState(() => _report = _report.copyWith(msgId: packet.msgId, broadcastAt: DateTime.now()));

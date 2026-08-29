@@ -59,7 +59,13 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
       final id = await LostReportsDb.insert(report);
 
       if (broadcast) {
-        final packet = await widget.mesh.sendAlert(kCategoryLostPerson);
+        // Name and age ride along on a detail packet so receiving phones
+        // can show who to look for — see LostPersonDetailPacket.
+        final packet = await widget.mesh.sendAlert(
+          kCategoryLostPerson,
+          lostName: report.name,
+          lostAge: report.age,
+        );
         if (packet != null) {
           await LostReportsDb.setBroadcast(id, packet.msgId, DateTime.now());
         }

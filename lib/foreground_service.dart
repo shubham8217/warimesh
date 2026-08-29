@@ -1,13 +1,19 @@
 // WariMesh — foreground service scaffolding.
 //
-// HONESTY NOTE (read before assuming the locked-screen scenario works):
-// This keeps the Android *process* alive longer in the background
-// (persistent notification, wake lock). It does NOT move the actual BLE
-// scan/advertise calls into the foreground task's background isolate —
-// `FlutterBluePlus` and `FlutterBlePeripheral` are still driven from the
-// main isolate in `MeshService`. Whether a foreground service alone is
-// enough to keep those calls running with the screen locked is genuinely
-// unverified. Keep the app foregrounded and the screen on while filming.
+// Started automatically at bootstrap (see MeshService.bootstrap) together
+// with a battery-optimisation exemption request, because an emergency app
+// that stops relaying when the screen locks isn't doing its job. The two
+// together are what keep the process alive and unfrozen in the background.
+//
+// HONESTY NOTE (read before claiming the locked-screen scenario works):
+// This keeps the Android *process* alive (persistent notification, wake
+// lock). It does NOT move the actual BLE scan/advertise calls into the
+// foreground task's background isolate — `FlutterBluePlus` and
+// `FlutterBlePeripheral` are still driven from the main isolate in
+// `MeshService`. That should keep working while the process lives, but how
+// long an aggressive OEM ROM (MIUI especially) actually honours that is
+// device-specific and still worth measuring on real hardware rather than
+// asserting.
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 @pragma('vm:entry-point')

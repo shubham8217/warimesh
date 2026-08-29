@@ -7,6 +7,11 @@
 // that locally (see UserDb) so mesh activity and reports can be
 // attributed to a person, not just a random device label. It only runs
 // once per phone — see the AuthGate in main.dart.
+//
+// A warkari's Dindi is deliberately NOT collected here — it's set (and can
+// be changed later) from the Home screen instead, via DindiPicker in
+// dindi_picker.dart. Keeps this screen to what's needed before the mesh
+// can even start: a name and a phone number.
 import 'package:flutter/material.dart';
 
 import '../database_service.dart';
@@ -27,7 +32,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController();
   final _phone = TextEditingController();
-  final _groupOrId = TextEditingController();
+  final _groupOrId = TextEditingController(); // volunteer camp/ID field only
   bool _saving = false;
 
   bool get _isWarkari => widget.role == UserRole.warkari;
@@ -48,7 +53,10 @@ class _LoginScreenState extends State<LoginScreen> {
       name: _name.text.trim(),
       phone: _phone.text.trim(),
       role: widget.role,
-      groupOrId: _groupOrId.text.trim().isEmpty ? '—' : _groupOrId.text.trim(),
+      // A warkari picks their Dindi later, on the Home screen — starts
+      // unset. A volunteer's camp/ID is still collected here.
+      groupOrId: _isWarkari ? '—' : (_groupOrId.text.trim().isEmpty ? '—' : _groupOrId.text.trim()),
+      meshId: generateMeshId(widget.role),
       loggedInAt: DateTime.now(),
     );
 
@@ -130,16 +138,18 @@ class _LoginScreenState extends State<LoginScreen> {
                 textInputAction: TextInputAction.next,
                 validator: (v) => (v == null || v.trim().isEmpty) ? 'A phone number is required' : null,
               ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _groupOrId,
-                decoration: InputDecoration(
-                  labelText: _isWarkari ? 'Dindi / group name (optional)' : 'Volunteer / camp ID (optional)',
-                  prefixIcon: const Icon(Icons.badge_outlined),
+              if (!_isWarkari) ...[
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _groupOrId,
+                  decoration: const InputDecoration(
+                    labelText: 'Volunteer / camp ID (optional)',
+                    prefixIcon: Icon(Icons.badge_outlined),
+                  ),
+                  textInputAction: TextInputAction.done,
+                  onFieldSubmitted: (_) => _submit(),
                 ),
-                textInputAction: TextInputAction.done,
-                onFieldSubmitted: (_) => _submit(),
-              ),
+              ],
               const SizedBox(height: 12),
               Card(
                 color: accent.withValues(alpha: 0.08),
@@ -150,10 +160,12 @@ class _LoginScreenState extends State<LoginScreen> {
                     children: [
                       Icon(Icons.info_outline, size: 18, color: accent),
                       const SizedBox(width: 10),
-                      const Expanded(
+                      Expanded(
                         child: Text(
-                          'WariMesh works fully offline. There\'s no account server — your details are saved only on this phone, so responders and reports can be traced back to you.',
-                          style: TextStyle(fontSize: 12.5),
+                          _isWarkari
+                              ? 'WariMesh works fully offline. There\'s no account server — your details are saved only on this phone. You\'ll pick or create your Dindi from the Home screen after signing in.'
+                              : 'WariMesh works fully offline. There\'s no account server — your details are saved only on this phone, so responders and reports can be traced back to you.',
+                          style: const TextStyle(fontSize: 12.5),
                         ),
                       ),
                     ],

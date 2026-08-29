@@ -8,7 +8,18 @@
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <!-- No maxSdkVersion any more. This used to be capped at 30 because the
+         only reason the app needed location was Android 11's rule that BLE
+         scanning implied it. An SOS now carries the sender's GPS position
+         (see LocationPacket in lib/models.dart), so this is needed as a
+         real location permission on every version — with the cap left on,
+         GPS would have been silently unavailable on Android 12+, which is
+         every phone this will realistically run on. Coarse is declared
+         alongside it because Android 12+ lets the person grant only
+         approximate location, and an approximate position still narrows a
+         search from a whole crowd to a corner of it. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
@@ -17,6 +28,21 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Without a battery-optimization exemption, Android (and aggressively
+         so on MIUI/OneUI) freezes the process once the screen goes off —
+         which is exactly when an SOS most needs to get through. The app
+         asks for this at startup; it's a request, and the person can
+         refuse, so the locked-screen path degrades rather than breaks. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Lets an incoming SOS wake the screen instead of sliding past as a
+         silent banner. Android 14+ grants this only to calling/alarm-class
+         apps by default; if the OS declines, the notification still fires
+         as a normal high-priority heads-up. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:label="WariMesh"
@@ -70,6 +96,22 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- Android 11+ hides other installed apps unless they're declared
+             here. Without these three, launching walking directions to an
+             alert's coordinates (see lib/directions.dart) would be blocked
+             even with Google Maps installed. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="google.navigation"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="geo"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
         </intent>
     </queries>
 </manifest>
