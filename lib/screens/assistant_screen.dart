@@ -36,13 +36,18 @@ class _AssistantScreenState extends State<AssistantScreen> {
 
   Future<void> _send() async {
     final text = _controller.text.trim();
-    if (text.isEmpty || widget.llm.busy || widget.llm.status != LlmStatus.ready) {
+    if (text.isEmpty ||
+        widget.llm.busy ||
+        widget.llm.status != LlmStatus.ready) {
       return;
     }
     _controller.clear();
-    await widget.llm.generate(text, onDelta: (_) {
-      if (mounted) _scrollToBottom();
-    });
+    await widget.llm.generate(
+      text,
+      onDelta: (_) {
+        if (mounted) _scrollToBottom();
+      },
+    );
     if (mounted) _scrollToBottom();
   }
 
@@ -60,7 +65,10 @@ class _AssistantScreenState extends State<AssistantScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Offline assistant'), automaticallyImplyLeading: false),
+      appBar: AppBar(
+        title: const Text('Offline assistant'),
+        automaticallyImplyLeading: false,
+      ),
       body: AnimatedBuilder(
         animation: widget.llm,
         builder: (context, _) {
@@ -73,7 +81,9 @@ class _AssistantScreenState extends State<AssistantScreen> {
                     : ListView.builder(
                         controller: _scroll,
                         padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                        itemCount: widget.llm.history.length + (widget.llm.busy ? 1 : 0),
+                        itemCount:
+                            widget.llm.history.length +
+                            (widget.llm.busy ? 1 : 0),
                         itemBuilder: (context, i) {
                           if (i < widget.llm.history.length) {
                             final msg = widget.llm.history[i];
@@ -85,7 +95,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
               ),
               _Composer(
                 controller: _controller,
-                enabled: widget.llm.status == LlmStatus.ready && !widget.llm.busy,
+                enabled:
+                    widget.llm.status == LlmStatus.ready && !widget.llm.busy,
                 onSend: _send,
               ),
             ],
@@ -104,51 +115,51 @@ class _StatusBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final (icon, color, text, action, actionLabel) = switch (llm.status) {
       LlmStatus.noModel => (
-          Icons.download_for_offline_outlined,
-          AppColors.warning,
-          llm.downloading
-              ? 'Downloading model… ${(llm.downloadProgress * 100).toStringAsFixed(0)}%'
-              : 'Model not downloaded yet',
-          llm.downloading
-              ? null
-              : () async {
-                  final ok = await llm.downloadModel();
-                  if (ok) await llm.loadModel();
-                },
-          'Download',
-        ),
+        Icons.download_for_offline_outlined,
+        AppColors.warning,
+        llm.downloading
+            ? 'Downloading model… ${(llm.downloadProgress * 100).toStringAsFixed(0)}%'
+            : 'Model not downloaded yet',
+        llm.downloading
+            ? null
+            : () async {
+                final ok = await llm.downloadModel();
+                if (ok) await llm.loadModel();
+              },
+        'Download',
+      ),
       LlmStatus.downloaded => (
-          Icons.inventory_2_outlined,
-          AppColors.warning,
-          'Model downloaded — tap Load model',
-          () async {
-            await llm.loadModel();
-          },
-          'Load',
-        ),
+        Icons.inventory_2_outlined,
+        AppColors.warning,
+        'Model downloaded — tap Load model',
+        () async {
+          await llm.loadModel();
+        },
+        'Load',
+      ),
       LlmStatus.loading => (
-          Icons.hourglass_top,
-          AppColors.warning,
-          'Loading model…',
-          null,
-          null,
-        ),
+        Icons.hourglass_top,
+        AppColors.warning,
+        'Loading model…',
+        null,
+        null,
+      ),
       LlmStatus.ready => (
-          Icons.check_circle_outline,
-          AppColors.relayed,
-          'Assistant ready · runs fully offline',
-          null,
-          null,
-        ),
+        Icons.check_circle_outline,
+        AppColors.relayed,
+        'Assistant ready · runs fully offline',
+        null,
+        null,
+      ),
       LlmStatus.error => (
-          Icons.error_outline,
-          AppColors.sos,
-          'Assistant error: ${llm.lastError ?? 'unknown'}',
-          () async {
-            await llm.loadModel();
-          },
-          'Retry',
-        ),
+        Icons.error_outline,
+        AppColors.sos,
+        'Assistant error: ${llm.lastError ?? 'unknown'}',
+        () async {
+          await llm.loadModel();
+        },
+        'Retry',
+      ),
     };
     return Material(
       color: color.withValues(alpha: 0.1),
@@ -159,7 +170,14 @@ class _StatusBanner extends StatelessWidget {
             Icon(icon, color: color, size: 20),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w600, fontSize: 13)),
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
             ),
             if (llm.status == LlmStatus.ready)
               TextButton(
@@ -181,10 +199,17 @@ class _StatusBanner extends StatelessWidget {
                       builder: (context) => AlertDialog(
                         title: const Text('Delete model?'),
                         content: const Text(
-                            'This removes the ~3.7 GB model from the phone. You\'ll need to re-download or re-push it to use the assistant again.'),
+                          'This removes the ~3.7 GB model from the phone. You\'ll need to re-download or re-push it to use the assistant again.',
+                        ),
                         actions: [
-                          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-                          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text('Cancel'),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.pop(context, true),
+                            child: const Text('Delete'),
+                          ),
                         ],
                       ),
                     );
@@ -194,7 +219,13 @@ class _StatusBanner extends StatelessWidget {
                 itemBuilder: (context) => const [
                   PopupMenuItem<String>(
                     value: 'delete',
-                    child: Row(children: [Icon(Icons.delete_outline, size: 18), SizedBox(width: 10), Text('Delete model')]),
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete_outline, size: 18),
+                        SizedBox(width: 10),
+                        Text('Delete model'),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -223,8 +254,8 @@ class _EmptyState extends StatelessWidget {
               noModel
                   ? Icons.download_for_offline_outlined
                   : downloaded
-                      ? Icons.inventory_2_outlined
-                      : Icons.psychology_alt_outlined,
+                  ? Icons.inventory_2_outlined
+                  : Icons.psychology_alt_outlined,
               size: 56,
               color: Theme.of(context).colorScheme.outline,
             ),
@@ -233,8 +264,8 @@ class _EmptyState extends StatelessWidget {
               noModel
                   ? 'Assistant model not installed'
                   : downloaded
-                      ? 'Model downloaded'
-                      : 'Ask a volunteer question',
+                  ? 'Model downloaded'
+                  : 'Ask a volunteer question',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
@@ -242,8 +273,8 @@ class _EmptyState extends StatelessWidget {
               noModel
                   ? 'Tap Download model, then Load model. After that it works with no network — fully on this phone.'
                   : downloaded
-                      ? 'One more step: load the model into memory (a few seconds), then it runs offline.'
-                      : 'First aid, lost-person search advice, heatstroke, crowd safety — answers generated on this phone, no network needed.',
+                  ? 'One more step: load the model into memory (a few seconds), then it runs offline.'
+                  : 'First aid, lost-person search advice, heatstroke, crowd safety — answers generated on this phone, no network needed.',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodySmall,
             ),
@@ -260,7 +291,10 @@ class _EmptyState extends StatelessWidget {
                     ? const SizedBox(
                         width: 18,
                         height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       )
                     : const Icon(Icons.download),
                 label: Text(
@@ -281,9 +315,22 @@ class _EmptyState extends StatelessWidget {
                 runSpacing: 8,
                 alignment: WrapAlignment.center,
                 children: [
-                  _SuggestionChip(text: 'What do I do for heatstroke?', onTap: () => _ask(context, 'What do I do for heatstroke?')),
-                  _SuggestionChip(text: 'How do I organize a search?', onTap: () => _ask(context, 'How do I organize a search for a missing person?')),
-                  _SuggestionChip(text: 'Crowd crush safety', onTap: () => _ask(context, 'How do I stay safe in a crowd crush?')),
+                  _SuggestionChip(
+                    text: 'What do I do for heatstroke?',
+                    onTap: () => _ask(context, 'What do I do for heatstroke?'),
+                  ),
+                  _SuggestionChip(
+                    text: 'How do I organize a search?',
+                    onTap: () => _ask(
+                      context,
+                      'How do I organize a search for a missing person?',
+                    ),
+                  ),
+                  _SuggestionChip(
+                    text: 'Crowd crush safety',
+                    onTap: () =>
+                        _ask(context, 'How do I stay safe in a crowd crush?'),
+                  ),
                 ],
               ),
           ],
@@ -305,10 +352,7 @@ class _SuggestionChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ActionChip(
-      label: Text(text),
-      onPressed: onTap,
-    );
+    return ActionChip(label: Text(text), onPressed: onTap);
   }
 }
 
@@ -324,9 +368,13 @@ class _MessageBubble extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.sizeOf(context).width * 0.82,
+        ),
         decoration: BoxDecoration(
-          color: isUser ? AppColors.lostPerson : Theme.of(context).colorScheme.surfaceContainerHighest,
+          color: isUser
+              ? AppColors.lostPerson
+              : Theme.of(context).colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16),
             topRight: const Radius.circular(16),
@@ -337,7 +385,9 @@ class _MessageBubble extends StatelessWidget {
         child: Text(
           message.text,
           style: TextStyle(
-            color: isUser ? Colors.white : Theme.of(context).colorScheme.onSurface,
+            color: isUser
+                ? Colors.white
+                : Theme.of(context).colorScheme.onSurface,
             height: 1.35,
           ),
         ),
@@ -357,7 +407,9 @@ class _ThinkingBubble extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.sizeOf(context).width * 0.82,
+        ),
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(16),
@@ -377,7 +429,10 @@ class _ThinkingBubble extends StatelessWidget {
             Expanded(
               child: Text(
                 text.isEmpty ? 'Thinking…' : text,
-                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, height: 1.35),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  height: 1.35,
+                ),
               ),
             ),
           ],
@@ -391,7 +446,11 @@ class _Composer extends StatelessWidget {
   final TextEditingController controller;
   final bool enabled;
   final VoidCallback onSend;
-  const _Composer({required this.controller, required this.enabled, required this.onSend});
+  const _Composer({
+    required this.controller,
+    required this.enabled,
+    required this.onSend,
+  });
 
   @override
   Widget build(BuildContext context) {

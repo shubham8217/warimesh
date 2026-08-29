@@ -75,9 +75,9 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => _saving = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not save report: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Could not save report: $e')));
       }
     }
   }
@@ -92,7 +92,11 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
           children: [
             Center(
-              child: LostPersonAvatar(iconIndex: _iconIndex, colorIndex: _colorIndex, radius: 40),
+              child: LostPersonAvatar(
+                iconIndex: _iconIndex,
+                colorIndex: _colorIndex,
+                radius: 40,
+              ),
             ),
             const SizedBox(height: 16),
             _AvatarPicker(
@@ -104,14 +108,21 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
             const SizedBox(height: 20),
             TextFormField(
               controller: _name,
-              decoration: const InputDecoration(labelText: 'Name', prefixIcon: Icon(Icons.badge_outlined)),
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                prefixIcon: Icon(Icons.badge_outlined),
+              ),
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Name is required' : null,
               textInputAction: TextInputAction.next,
             ),
             const SizedBox(height: 12),
             TextFormField(
               controller: _age,
-              decoration: const InputDecoration(labelText: 'Age (e.g. "7" or "approx. 60s")', prefixIcon: Icon(Icons.cake_outlined)),
+              decoration: const InputDecoration(
+                labelText: 'Age (e.g. "7" or "approx. 60s")',
+                prefixIcon: Icon(Icons.cake_outlined),
+              ),
               textInputAction: TextInputAction.next,
             ),
             const SizedBox(height: 12),
@@ -123,18 +134,26 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
                 prefixIcon: Icon(Icons.notes_outlined),
               ),
               maxLines: 3,
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'A short description helps people recognize them' : null,
+              validator: (v) => (v == null || v.trim().isEmpty)
+                  ? 'A short description helps people recognize them'
+                  : null,
             ),
             const SizedBox(height: 12),
             TextFormField(
               controller: _location,
-              decoration: const InputDecoration(labelText: 'Last seen location', prefixIcon: Icon(Icons.place_outlined)),
+              decoration: const InputDecoration(
+                labelText: 'Last seen location',
+                prefixIcon: Icon(Icons.place_outlined),
+              ),
               textInputAction: TextInputAction.next,
             ),
             const SizedBox(height: 12),
             TextFormField(
               controller: _contact,
-              decoration: const InputDecoration(labelText: 'Contact info (optional)', prefixIcon: Icon(Icons.call_outlined)),
+              decoration: const InputDecoration(
+                labelText: 'Contact info (optional)',
+                prefixIcon: Icon(Icons.call_outlined),
+              ),
               textInputAction: TextInputAction.done,
             ),
             const SizedBox(height: 8),
@@ -144,7 +163,11 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
                 padding: EdgeInsets.all(14),
                 child: Row(
                   children: [
-                    Icon(Icons.info_outline, size: 18, color: AppColors.lostPerson),
+                    Icon(
+                      Icons.info_outline,
+                      size: 18,
+                      color: AppColors.lostPerson,
+                    ),
                     SizedBox(width: 10),
                     Expanded(
                       child: Text(
@@ -158,7 +181,9 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
             ),
             const SizedBox(height: 24),
             FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: AppColors.lostPerson),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.lostPerson,
+              ),
               onPressed: _saving ? null : () => _save(broadcast: true),
               icon: const Icon(Icons.podcasts),
               label: const Text('Save & broadcast alert'),
@@ -205,8 +230,13 @@ class _AvatarPicker extends StatelessWidget {
                 onTap: () => onIconChanged(i),
                 child: CircleAvatar(
                   radius: 22,
-                  backgroundColor: selected ? avatarColorFor(colorIndex) : Colors.grey.shade200,
-                  child: Icon(avatarIconFor(i), color: selected ? Colors.white : Colors.grey.shade600),
+                  backgroundColor: selected
+                      ? avatarColorFor(colorIndex)
+                      : Colors.grey.shade200,
+                  child: Icon(
+                    avatarIconFor(i),
+                    color: selected ? Colors.white : Colors.grey.shade600,
+                  ),
                 ),
               );
             },
@@ -226,7 +256,9 @@ class _AvatarPicker extends StatelessWidget {
                 child: CircleAvatar(
                   radius: 14,
                   backgroundColor: avatarColorFor(i),
-                  child: selected ? const Icon(Icons.check, color: Colors.white, size: 16) : null,
+                  child: selected
+                      ? const Icon(Icons.check, color: Colors.white, size: 16)
+                      : null,
                 ),
               );
             },

@@ -58,25 +58,27 @@ class LocationService {
       // once the person has moved far enough to clear the distance filter.
       if (_last == null) unawaited(currentFix());
 
-      _sub = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          // Medium, not high, on purpose. High is GPS-only: indoors, in a
-          // vehicle, or under dense cover it simply never fires, so the
-          // stream stays silent exactly when a cached position would have
-          // been better than nothing. Medium lets Android use the fused
-          // network provider too, which resolves almost anywhere to within
-          // a hundred metres or so — plenty to say which part of a crowd
-          // to search, and the GPS fix supersedes it as soon as one lands.
-          accuracy: LocationAccuracy.medium,
-          // Someone walking the Wari covers 10m every few seconds. Updating
-          // on distance rather than on a timer keeps the fix current while
-          // they move and costs nothing while they're resting.
-          distanceFilter: 10,
-        ),
-      ).listen(
-        (p) => _last = p,
-        onError: (Object e) => debugPrint('WariMesh[Location] stream error: $e'),
-      );
+      _sub =
+          Geolocator.getPositionStream(
+            locationSettings: const LocationSettings(
+              // Medium, not high, on purpose. High is GPS-only: indoors, in a
+              // vehicle, or under dense cover it simply never fires, so the
+              // stream stays silent exactly when a cached position would have
+              // been better than nothing. Medium lets Android use the fused
+              // network provider too, which resolves almost anywhere to within
+              // a hundred metres or so — plenty to say which part of a crowd
+              // to search, and the GPS fix supersedes it as soon as one lands.
+              accuracy: LocationAccuracy.medium,
+              // Someone walking the Wari covers 10m every few seconds. Updating
+              // on distance rather than on a timer keeps the fix current while
+              // they move and costs nothing while they're resting.
+              distanceFilter: 10,
+            ),
+          ).listen(
+            (p) => _last = p,
+            onError: (Object e) =>
+                debugPrint('WariMesh[Location] stream error: $e'),
+          );
 
       return true;
     } catch (e) {
@@ -87,7 +89,9 @@ class LocationService {
 
   /// One fresh fix, giving up after [timeout]. Used to improve on the
   /// cached position just after an SOS goes out — never to gate it.
-  Future<Position?> currentFix({Duration timeout = const Duration(seconds: 8)}) async {
+  Future<Position?> currentFix({
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
     // Two attempts, deliberately. A high-accuracy request is GPS-only, and
     // GPS indoors or under dense tree cover frequently never fixes at all —
     // it just times out and yields nothing. Falling back to reduced
@@ -98,7 +102,10 @@ class LocationService {
     for (final accuracy in [LocationAccuracy.high, LocationAccuracy.medium]) {
       try {
         final p = await Geolocator.getCurrentPosition(
-          locationSettings: LocationSettings(accuracy: accuracy, timeLimit: timeout),
+          locationSettings: LocationSettings(
+            accuracy: accuracy,
+            timeLimit: timeout,
+          ),
         );
         _last = p;
         return p;
@@ -116,24 +123,36 @@ class LocationService {
       final cached = await Geolocator.getLastKnownPosition();
       if (cached != null) {
         _last = cached;
-        debugPrint('WariMesh[Location] falling back to a cached fix from ${cached.timestamp}');
+        debugPrint(
+          'WariMesh[Location] falling back to a cached fix from ${cached.timestamp}',
+        );
         return cached;
       }
     } catch (e) {
       debugPrint('WariMesh[Location] no cached fix either: $e');
     }
 
-    debugPrint('WariMesh[Location] no position available at all — likely indoors with no cached fix');
+    debugPrint(
+      'WariMesh[Location] no position available at all — likely indoors with no cached fix',
+    );
     return null;
   }
 
   /// Metres between two coordinates.
-  static double distanceBetween(double lat1, double lon1, double lat2, double lon2) =>
-      Geolocator.distanceBetween(lat1, lon1, lat2, lon2);
+  static double distanceBetween(
+    double lat1,
+    double lon1,
+    double lat2,
+    double lon2,
+  ) => Geolocator.distanceBetween(lat1, lon1, lat2, lon2);
 
   /// Compass bearing from the first coordinate to the second, in degrees.
-  static double bearingBetween(double lat1, double lon1, double lat2, double lon2) =>
-      Geolocator.bearingBetween(lat1, lon1, lat2, lon2);
+  static double bearingBetween(
+    double lat1,
+    double lon1,
+    double lat2,
+    double lon2,
+  ) => Geolocator.bearingBetween(lat1, lon1, lat2, lon2);
 
   void dispose() {
     _sub?.cancel();

@@ -19,6 +19,7 @@
 // screen every time they look at it, not a helpful reshuffle.
 import 'package:flutter/material.dart';
 
+import '../l10n/app_strings.dart';
 import '../mesh_service.dart';
 import '../models.dart';
 import '../theme.dart';
@@ -38,14 +39,14 @@ class AlertsScreen extends StatelessWidget {
       slivers: [
         SliverAppBar(
           floating: true,
-          title: const Text('Response queue'),
+          title: Text(t.responseQueue),
           actions: [
             if (open > 0)
               Padding(
                 padding: const EdgeInsets.only(right: 16),
                 child: Center(
                   child: StatusPill(
-                    text: '$open open',
+                    text: '${mrNum(open)} प्रलंबित',
                     color: AppColors.sos,
                     icon: Icons.notifications_active_outlined,
                   ),
@@ -87,8 +88,8 @@ class _EmptyQueue extends StatelessWidget {
             color: AppColors.relayed.withValues(alpha: 0.7),
           ),
           const SizedBox(height: 16),
-          const Text(
-            'Nothing waiting',
+          Text(
+            t.nothingWaiting,
             style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
           ),
           const SizedBox(height: 8),
@@ -96,8 +97,7 @@ class _EmptyQueue extends StatelessWidget {
             // Said plainly, because an empty screen in an emergency app is
             // ambiguous in a way that matters: "no alerts" and "not
             // listening" look identical, and only one of them is fine.
-            'No alerts have reached this phone. It stays listening in the '
-            'background — anything that arrives lands here.',
+            t.nothingWaitingDetail,
             textAlign: TextAlign.center,
             style: Theme.of(
               context,
@@ -159,7 +159,12 @@ class AlertQueueCard extends StatelessWidget {
                           // wrong; the plain title otherwise. For a missing
                           // person the name still wins — that is the thing
                           // the responder is scanning the crowd for.
-                          alert.lostSummary ?? alert.headline,
+                          alert.lostSummary ??
+                              (alert.isSos
+                                  ? (sosReasonIsSpecific(alert.reason)
+                                        ? '${sosReasonEmoji(alert.reason)} ${t.sosReason(alert.reason)}'
+                                        : 'SOS')
+                                  : t.missingWarkari),
                           style: const TextStyle(
                             fontWeight: FontWeight.w800,
                             fontSize: 17,
@@ -184,7 +189,7 @@ class AlertQueueCard extends StatelessWidget {
               if (alert.lostSummary != null && alert.reasonLabel != null) ...[
                 const SizedBox(height: 8),
                 StatusPill(
-                  text: alert.reasonLabel!,
+                  text: t.sosReason(alert.reason),
                   color: AppColors.sos,
                   icon: Icons.info_outline,
                 ),
@@ -228,21 +233,21 @@ class _StateChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (alert.isResolved) {
-      return const StatusPill(
-        text: 'Closed',
+      return StatusPill(
+        text: t.statusClosed,
         color: AppColors.relayed,
         icon: Icons.check,
       );
     }
     if (alert.isClaimed) {
-      return const StatusPill(
-        text: 'Taken',
+      return StatusPill(
+        text: t.statusTaken,
         color: AppColors.warning,
         icon: Icons.directions_run,
       );
     }
     return StatusPill(
-      text: 'Open',
+      text: t.statusOpen,
       color: alert.isSos ? AppColors.sos : AppColors.lostPerson,
       icon: Icons.priority_high,
     );
@@ -262,17 +267,17 @@ class _LocationLine extends StatelessWidget {
     final String text;
     final IconData icon;
     if (distance != null && direction != null) {
-      text = '$distance, to your $direction';
       icon = Icons.near_me;
     } else if (alert.hasLocation) {
-      // We have their coordinates but not our own — say so, rather than
-      // showing a distance we cannot compute or hiding the fact entirely.
-      text = 'Position known, but this phone has no fix to measure from';
       icon = Icons.location_searching;
     } else {
-      text = 'No position — this alert came without one';
       icon = Icons.location_off_outlined;
     }
+    text = t.whereLabel(
+      hasLocation: alert.hasLocation,
+      distanceMetres: alert.distanceMetres,
+      bearingDegrees: alert.bearingDegrees,
+    );
 
     return Row(
       children: [
@@ -306,11 +311,11 @@ class _ClaimBanner extends StatelessWidget {
     // exists for.
     final String who;
     if (mine) {
-      who = 'You are responding';
+      who = t.youAreResponding;
     } else {
       final role = mesh.responderRoleLabelFor(alert.claimedBy!);
       final name = mesh.nameFor(alert.claimedBy!) ?? alert.claimedBy!;
-      who = '$name · $role ${responderVerb(role)}';
+      who = '$name · $role ${t.responderVerbFor(role)}';
     }
     return _Banner(
       color: AppColors.warning,
@@ -334,8 +339,7 @@ class _ResolvedBanner extends StatelessWidget {
     return _Banner(
       color: AppColors.relayed,
       icon: Icons.check_circle,
-      text:
-          '${resolveReasonLabel(alert.resolvedReason ?? kResolveHandled)} — closed by $who',
+      text: '${t.statusClosed} — $who',
     );
   }
 }
@@ -390,7 +394,7 @@ class _Actions extends StatelessWidget {
         child: OutlinedButton.icon(
           onPressed: () => mesh.reopenAlert(alert),
           icon: const Icon(Icons.undo, size: 18),
-          label: const Text('Reopen'),
+          label: Text(t.reopen),
         ),
       );
     }
@@ -411,9 +415,7 @@ class _Actions extends StatelessWidget {
               onPressed: () => mesh.reportSpotted(alert),
               icon: const Icon(Icons.visibility_outlined, size: 18),
               label: Text(
-                alert.isSpotted
-                    ? 'Report another sighting'
-                    : "I'VE SPOTTED THEM",
+                alert.isSpotted ? t.reportAnotherSighting : t.iveSpottedThem,
               ),
             ),
           ),
@@ -450,7 +452,7 @@ class _ClaimResolveRow extends StatelessWidget {
               ),
               onPressed: () => mesh.claimAlert(alert),
               icon: const Icon(Icons.pan_tool_alt, size: 18),
-              label: const Text("I'm responding"),
+              label: Text(t.imResponding),
             ),
           )
         else if (!alert.claimedByMe(mesh.myMeshId))
@@ -461,7 +463,7 @@ class _ClaimResolveRow extends StatelessWidget {
             child: OutlinedButton.icon(
               onPressed: () => mesh.claimAlert(alert),
               icon: const Icon(Icons.group_add_outlined, size: 18),
-              label: const Text('Join anyway'),
+              label: Text(t.joinAnyway),
             ),
           ),
         if (mineToClose) ...[
@@ -473,7 +475,7 @@ class _ClaimResolveRow extends StatelessWidget {
               ),
               onPressed: () => _close(context),
               icon: const Icon(Icons.check, size: 18),
-              label: const Text('Close'),
+              label: Text(t.closeAlert),
             ),
           ),
         ],

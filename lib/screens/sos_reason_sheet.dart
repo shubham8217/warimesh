@@ -20,6 +20,7 @@
 //    gate in front of it.
 import 'package:flutter/material.dart';
 
+import '../l10n/app_strings.dart';
 import '../models.dart';
 import '../theme.dart';
 
@@ -62,14 +63,13 @@ class _SosReasonSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
-              'What do you need help with?',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20),
+            Text(
+              t.sosReasonQuestion,
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20),
             ),
             const SizedBox(height: 4),
             Text(
-              'Your alert goes out either way. This tells whoever answers '
-              'what to bring.',
+              t.sosReasonSubtitle,
               style: Theme.of(
                 context,
               ).textTheme.bodySmall?.copyWith(color: muted),
@@ -83,7 +83,7 @@ class _SosReasonSheet extends StatelessWidget {
             const SizedBox(height: 8),
             TextButton(
               onPressed: () => Navigator.of(context).pop(kSosReasonUnspecified),
-              child: const Text("Send without saying"),
+              child: Text(t.sosSendWithoutSaying),
             ),
           ],
         ),
@@ -127,7 +127,7 @@ class _ReasonRow extends StatelessWidget {
                 const SizedBox(width: 16),
                 Expanded(
                   child: Text(
-                    sosReasonLabel(reason),
+                    t.sosReason(reason),
                     style: const TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 17,

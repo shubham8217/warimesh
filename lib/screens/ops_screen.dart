@@ -42,17 +42,27 @@ class OpsScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _OpsLine(
-                        icon: mesh.bluetoothOn ? Icons.bluetooth : Icons.bluetooth_disabled,
-                        color: mesh.bluetoothOn ? AppColors.relayed : AppColors.sos,
-                        title: mesh.bluetoothOn ? 'Bluetooth on' : 'Bluetooth off',
+                        icon: mesh.bluetoothOn
+                            ? Icons.bluetooth
+                            : Icons.bluetooth_disabled,
+                        color: mesh.bluetoothOn
+                            ? AppColors.relayed
+                            : AppColors.sos,
+                        title: mesh.bluetoothOn
+                            ? 'Bluetooth on'
+                            : 'Bluetooth off',
                         detail: mesh.bluetoothOn
                             ? 'The radio is available'
                             : 'Nothing can be sent or received until this is turned on',
                       ),
                       const Divider(height: 24),
                       _OpsLine(
-                        icon: mesh.scanning ? Icons.wifi_tethering : Icons.wifi_tethering_off,
-                        color: mesh.scanning ? AppColors.relayed : AppColors.warning,
+                        icon: mesh.scanning
+                            ? Icons.wifi_tethering
+                            : Icons.wifi_tethering_off,
+                        color: mesh.scanning
+                            ? AppColors.relayed
+                            : AppColors.warning,
                         title: mesh.scanning ? 'Listening' : 'Not listening',
                         detail: mesh.scanning
                             ? 'Picking up alerts from phones in range'
@@ -60,9 +70,15 @@ class OpsScreen extends StatelessWidget {
                       ),
                       const Divider(height: 24),
                       _OpsLine(
-                        icon: mesh.peripheralSupported ? Icons.podcasts : Icons.error_outline,
-                        color: mesh.peripheralSupported ? AppColors.relayed : AppColors.warning,
-                        title: mesh.peripheralSupported ? 'Can transmit' : 'Receive only',
+                        icon: mesh.peripheralSupported
+                            ? Icons.podcasts
+                            : Icons.error_outline,
+                        color: mesh.peripheralSupported
+                            ? AppColors.relayed
+                            : AppColors.warning,
+                        title: mesh.peripheralSupported
+                            ? 'Can transmit'
+                            : 'Receive only',
                         // This is the single most important line on the
                         // screen when it reads "Receive only": a phone that
                         // cannot advertise looks completely normal, relays
@@ -71,14 +87,16 @@ class OpsScreen extends StatelessWidget {
                         detail: mesh.peripheralSupported
                             ? 'This phone relays what it hears, and can answer alerts'
                             : 'This phone has no Bluetooth transmit mode — it can hear '
-                                'alerts but cannot relay them or tell anyone it is responding',
+                                  'alerts but cannot relay them or tell anyone it is responding',
                       ),
                       const Divider(height: 24),
                       _OpsLine(
                         icon: mesh.backgroundServiceEnabled
                             ? Icons.shield_outlined
                             : Icons.shield_moon_outlined,
-                        color: mesh.backgroundServiceEnabled ? AppColors.relayed : AppColors.warning,
+                        color: mesh.backgroundServiceEnabled
+                            ? AppColors.relayed
+                            : AppColors.warning,
                         title: mesh.backgroundServiceEnabled
                             ? 'Relaying with the screen off'
                             : 'Stops when the screen locks',
@@ -91,14 +109,19 @@ class OpsScreen extends StatelessWidget {
                         icon: Icons.storage_outlined,
                         color: muted,
                         title: '${mesh.seenCount} alerts handled',
-                        detail: 'Kept on this phone, so an alert seen before a '
+                        detail:
+                            'Kept on this phone, so an alert seen before a '
                             'restart is not treated as new afterwards',
                       ),
                       const Divider(height: 24),
                       _OpsLine(
-                        icon: mesh.hasLocationFix ? Icons.my_location : Icons.location_searching,
+                        icon: mesh.hasLocationFix
+                            ? Icons.my_location
+                            : Icons.location_searching,
                         color: mesh.hasLocationFix ? AppColors.relayed : muted,
-                        title: mesh.hasLocationFix ? 'Location fix' : 'No location fix',
+                        title: mesh.hasLocationFix
+                            ? 'Location fix'
+                            : 'No location fix',
                         detail: mesh.hasLocationFix
                             ? 'Incoming alerts can be shown with a distance and direction'
                             : 'Alerts will arrive without a distance until GPS settles',
@@ -111,20 +134,29 @@ class OpsScreen extends StatelessWidget {
               SwitchListTile(
                 value: mesh.backgroundServiceEnabled,
                 onChanged: (v) => mesh.toggleBackgroundService(v),
-                title: const Text('Background relay', style: TextStyle(fontWeight: FontWeight.w700)),
+                title: const Text(
+                  'Background relay',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
                 subtitle: const Text(
                   'Keeps hearing and passing on alerts when the screen is off. '
                   'Leave this on unless the battery is critical.',
                 ),
-                tileColor: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                tileColor: Theme.of(
+                  context,
+                ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
               ),
               const SizedBox(height: 20),
               SectionHeader(
                 title: 'Recent activity',
                 trailing: TextButton(
                   onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => ActivityLogScreen(mesh: mesh)),
+                    MaterialPageRoute(
+                      builder: (_) => ActivityLogScreen(mesh: mesh),
+                    ),
                   ),
                   child: const Text('View all'),
                 ),
@@ -133,7 +165,8 @@ class OpsScreen extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest
+                        .withValues(alpha: 0.4),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Row(
@@ -152,7 +185,10 @@ class OpsScreen extends StatelessWidget {
               else
                 Card(
                   child: Column(
-                    children: mesh.log.take(6).map((e) => LogTile(entry: e)).toList(),
+                    children: mesh.log
+                        .take(6)
+                        .map((e) => LogTile(entry: e))
+                        .toList(),
                   ),
                 ),
             ]),
@@ -187,14 +223,20 @@ class _HeadlineCard extends StatelessWidget {
           Icon(canRelay ? Icons.hub : Icons.link_off, color: color, size: 30),
           const SizedBox(height: 12),
           Text(
-            canRelay ? 'Your phone is part of the mesh' : 'Your phone is off the mesh',
-            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: color),
+            canRelay
+                ? 'Your phone is part of the mesh'
+                : 'Your phone is off the mesh',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 18,
+              color: color,
+            ),
           ),
           const SizedBox(height: 6),
           Text(
             canRelay
                 ? 'It is listening for alerts and passing on what it hears, '
-                    'whether or not you are looking at it.'
+                      'whether or not you are looking at it.'
                 : 'It is not hearing or relaying anything. Turn Bluetooth on.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
@@ -228,13 +270,19 @@ class _OpsLine extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                ),
+              ),
               const SizedBox(height: 2),
               Text(
                 detail,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ),

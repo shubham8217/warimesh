@@ -35,22 +35,46 @@ class _Preset {
 }
 
 const List<_Preset> _kPresets = [
-  _Preset(Icons.alt_route, 'Route change',
-      'Route diverted ahead. Follow volunteers in red. Do not turn back.'),
-  _Preset(Icons.water_drop_outlined, 'Water point',
-      'Water point ahead on the left. Free drinking water for all.'),
-  _Preset(Icons.no_drinks_outlined, 'Water closed',
-      'Water point ahead is closed. Next water is at the following halt.'),
-  _Preset(Icons.medical_services_outlined, 'Medical camp',
-      'Medical camp ahead. First aid, ORS and doctors available.'),
-  _Preset(Icons.groups_outlined, 'Crowd ahead',
-      'Heavy crowd ahead. Slow down, keep left, hold on to children.'),
-  _Preset(Icons.child_care_outlined, 'Lost child desk',
-      'Lost child desk at this camp. Bring any child found alone here.'),
-  _Preset(Icons.thunderstorm_outlined, 'Weather',
-      'Rain expected. Take shelter at the next halt if you can.'),
-  _Preset(Icons.night_shelter_outlined, 'Halt for night',
-      'Night halt at this camp. Food and sleeping space available.'),
+  _Preset(
+    Icons.alt_route,
+    'Route change',
+    'Route diverted ahead. Follow volunteers in red. Do not turn back.',
+  ),
+  _Preset(
+    Icons.water_drop_outlined,
+    'Water point',
+    'Water point ahead on the left. Free drinking water for all.',
+  ),
+  _Preset(
+    Icons.no_drinks_outlined,
+    'Water closed',
+    'Water point ahead is closed. Next water is at the following halt.',
+  ),
+  _Preset(
+    Icons.medical_services_outlined,
+    'Medical camp',
+    'Medical camp ahead. First aid, ORS and doctors available.',
+  ),
+  _Preset(
+    Icons.groups_outlined,
+    'Crowd ahead',
+    'Heavy crowd ahead. Slow down, keep left, hold on to children.',
+  ),
+  _Preset(
+    Icons.child_care_outlined,
+    'Lost child desk',
+    'Lost child desk at this camp. Bring any child found alone here.',
+  ),
+  _Preset(
+    Icons.thunderstorm_outlined,
+    'Weather',
+    'Rain expected. Take shelter at the next halt if you can.',
+  ),
+  _Preset(
+    Icons.night_shelter_outlined,
+    'Halt for night',
+    'Night halt at this camp. Food and sleeping space available.',
+  ),
 ];
 
 /// How long an advisory keeps repeating on the radio. See the file header.
@@ -111,7 +135,10 @@ class _AdvisoryScreenState extends State<AdvisoryScreen> {
                 color: AppColors.demo.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Text(body, style: const TextStyle(fontWeight: FontWeight.w600)),
+              child: Text(
+                body,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
             ),
             const SizedBox(height: 12),
             Text(
@@ -120,14 +147,20 @@ class _AdvisoryScreenState extends State<AdvisoryScreen> {
               // Worth one tap of friction.
               'Every phone in range will be notified, in every Dindi.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Send')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Send'),
+          ),
         ],
       ),
     );
@@ -151,14 +184,19 @@ class _AdvisoryScreenState extends State<AdvisoryScreen> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.campaign_outlined, color: AppColors.demo),
+                      const Icon(
+                        Icons.campaign_outlined,
+                        color: AppColors.demo,
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
                           'An advisory reaches every phone in range, in every Dindi, '
                           'and repeats for ${_kAdvisoryAirtime.inMinutes} minutes so people '
                           'still walking towards you also hear it.',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: muted),
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodySmall?.copyWith(color: muted),
                         ),
                       ),
                     ],
@@ -169,9 +207,9 @@ class _AdvisoryScreenState extends State<AdvisoryScreen> {
               Text(
                 'One tap',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: muted,
-                    ),
+                  fontWeight: FontWeight.w800,
+                  color: muted,
+                ),
               ),
               const SizedBox(height: 10),
               GridView.count(
@@ -194,9 +232,9 @@ class _AdvisoryScreenState extends State<AdvisoryScreen> {
               Text(
                 'Something else',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: muted,
-                    ),
+                  fontWeight: FontWeight.w800,
+                  color: muted,
+                ),
               ),
               const SizedBox(height: 10),
               TextField(
@@ -205,7 +243,8 @@ class _AdvisoryScreenState extends State<AdvisoryScreen> {
                 maxLines: 3,
                 textCapitalization: TextCapitalization.sentences,
                 decoration: const InputDecoration(
-                  hintText: 'Short and specific — people read this while walking',
+                  hintText:
+                      'Short and specific — people read this while walking',
                 ),
                 onChanged: (_) => setState(() {}),
               ),
@@ -233,7 +272,9 @@ class _AdvisoryScreenState extends State<AdvisoryScreen> {
                       // crowd should know the crowd is not the only audience.
                       'Nothing here is private. A Bluetooth advertisement is public — '
                       'anyone in range with a scanner can read it, WariMesh user or not.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: muted),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(color: muted),
                     ),
                   ),
                 ],
@@ -251,7 +292,11 @@ class _PresetTile extends StatelessWidget {
   final bool enabled;
   final VoidCallback onTap;
 
-  const _PresetTile({required this.preset, required this.enabled, required this.onTap});
+  const _PresetTile({
+    required this.preset,
+    required this.enabled,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -269,7 +314,10 @@ class _PresetTile extends StatelessWidget {
               const SizedBox(height: 8),
               Text(
                 preset.label,
-                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),

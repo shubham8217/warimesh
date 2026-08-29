@@ -22,6 +22,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:warimesh/database_service.dart';
+import 'package:warimesh/l10n/app_strings.dart';
 import 'package:warimesh/main.dart';
 
 /// Stubs the on-device LLM platform channels (warimesh/llm + events) so the
@@ -63,89 +64,113 @@ void main() {
     await UserDb.clear();
   });
 
-  testWidgets('a volunteer picks their role, signs in, and reaches the volunteer dashboard', (tester) async {
-    _stubLlmChannels(tester);
-    await tester.runAsync(() async {
-      await tester.pumpWidget(const WariMeshApp());
-      await Future.delayed(const Duration(milliseconds: 900));
-    });
-    await tester.pump();
+  testWidgets(
+    'a volunteer picks their role, signs in, and reaches the volunteer dashboard',
+    (tester) async {
+      _stubLlmChannels(tester);
+      await tester.runAsync(() async {
+        await tester.pumpWidget(const WariMeshApp());
+        await Future.delayed(const Duration(milliseconds: 900));
+      });
+      await tester.pump();
 
-    // Nobody signed in yet on a fresh DB — role selection comes first.
-    expect(find.text('Who\'s signing in?'), findsOneWidget);
-    await tester.tap(find.text('Volunteer'));
-    await tester.pump();
+      // Nobody signed in yet on a fresh DB — role selection comes first.
+      expect(find.text('Who\'s signing in?'), findsOneWidget);
+      await tester.tap(find.text('Volunteer'));
+      await tester.pump();
 
-    expect(find.text('Volunteer sign-in'), findsOneWidget);
-    await tester.enterText(find.widgetWithText(TextFormField, 'Full name'), 'Test Volunteer');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Phone number'), '555-0100');
-    await tester.runAsync(() async {
-      await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
-      await Future.delayed(const Duration(milliseconds: 900));
-    });
-    await tester.pump();
+      expect(find.text('Volunteer sign-in'), findsOneWidget);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Full name'),
+        'Test Volunteer',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Phone number'),
+        '555-0100',
+      );
+      await tester.runAsync(() async {
+        await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
+        await Future.delayed(const Duration(milliseconds: 900));
+      });
+      await tester.pump();
 
-    // A volunteer's home is their duty state, not a copy of the warkari
-    // dashboard. The two markers below are what distinguishes the roles now:
-    // the response queue at the top, and the help-point switch. Neither
-    // exists for a warkari, and "Send SOS" no longer sits on this screen at
-    // all — it moved to the overflow menu, because a volunteer opens this
-    // app to find out who needs them, not to raise an alarm themselves.
-    expect(find.text('Nobody waiting'), findsOneWidget);
-    expect(find.text('Not at a help point'), findsWidgets);
-    expect(find.text('Send SOS'), findsNothing);
-    expect(find.textContaining('Namaskar'), findsNothing);
-    // The Dindi card must be present for a volunteer too. It was missing
-    // from this screen entirely, which left a volunteer with no way to
-    // create or join a Dindi from their own home.
-    expect(find.text('Create or join a Dindi'), findsOneWidget);
+      // A volunteer's home is their duty state, not a copy of the warkari
+      // dashboard. The two markers below are what distinguishes the roles now:
+      // the response queue at the top, and the help-point switch. Neither
+      // exists for a warkari, and "Send SOS" no longer sits on this screen at
+      // all — it moved to the overflow menu, because a volunteer opens this
+      // app to find out who needs them, not to raise an alarm themselves.
+      expect(find.text('Nobody waiting'), findsOneWidget);
+      // Asserted through the string layer rather than a hardcoded literal,
+      // so the app's language and its tests cannot drift apart.
+      expect(find.text(t.notAtHelpPoint), findsWidgets);
+      expect(find.text(t.sosSend), findsNothing);
+      expect(find.textContaining('नमस्कार'), findsNothing);
+      // The Dindi card must be present for a volunteer too. It was missing
+      // from this screen entirely, which left a volunteer with no way to
+      // create or join a Dindi from their own home.
+      expect(find.text('दिंडी तयार करा किंवा सामील व्हा'), findsOneWidget);
 
-    // Let MeshService.bootstrap()'s in-flight real async work (permissions,
-    // DB, BLE adapter checks — all try/catch-guarded, see mesh_service.dart)
-    // finish before the test ends and tears down the widget tree, so
-    // nothing calls notifyListeners() on an already-disposed MeshService.
-    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 900)));
-    await tester.pump();
-  });
+      // Let MeshService.bootstrap()'s in-flight real async work (permissions,
+      // DB, BLE adapter checks — all try/catch-guarded, see mesh_service.dart)
+      // finish before the test ends and tears down the widget tree, so
+      // nothing calls notifyListeners() on an already-disposed MeshService.
+      await tester.runAsync(
+        () => Future.delayed(const Duration(milliseconds: 900)),
+      );
+      await tester.pump();
+    },
+  );
 
-  testWidgets('a warkari picks their role, signs in, and reaches the warkari home screen', (tester) async {
-    _stubLlmChannels(tester);
-    await tester.runAsync(() async {
-      await tester.pumpWidget(const WariMeshApp());
-      await Future.delayed(const Duration(milliseconds: 900));
-    });
-    await tester.pump();
+  testWidgets(
+    'a warkari picks their role, signs in, and reaches the warkari home screen',
+    (tester) async {
+      _stubLlmChannels(tester);
+      await tester.runAsync(() async {
+        await tester.pumpWidget(const WariMeshApp());
+        await Future.delayed(const Duration(milliseconds: 900));
+      });
+      await tester.pump();
 
-    expect(find.text('Who\'s signing in?'), findsOneWidget);
-    await tester.tap(find.text('Warkari'));
-    await tester.pump();
+      expect(find.text('Who\'s signing in?'), findsOneWidget);
+      await tester.tap(find.text('Warkari'));
+      await tester.pump();
 
-    expect(find.text('Warkari sign-in'), findsOneWidget);
-    await tester.enterText(find.widgetWithText(TextFormField, 'Full name'), 'Test Warkari');
-    await tester.enterText(find.widgetWithText(TextFormField, 'Phone number'), '555-0200');
-    // The sign-in form scrolls (the warkari flow adds the Create/Join Dindi
-    // picker, which can push "Sign in" below the fold) — ListView only
-    // inflates children near the viewport, same as ListView.builder, so the
-    // button must be scrolled into view before it can be found or tapped.
-    await tester.scrollUntilVisible(
-      find.widgetWithText(FilledButton, 'Sign in'),
-      200,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.runAsync(() async {
-      await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
-      await Future.delayed(const Duration(milliseconds: 900));
-    });
-    await tester.pump();
+      expect(find.text('Warkari sign-in'), findsOneWidget);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Full name'),
+        'Test Warkari',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Phone number'),
+        '555-0200',
+      );
+      // The sign-in form scrolls (the warkari flow adds the Create/Join Dindi
+      // picker, which can push "Sign in" below the fold) — ListView only
+      // inflates children near the viewport, same as ListView.builder, so the
+      // button must be scrolled into view before it can be found or tapped.
+      await tester.scrollUntilVisible(
+        find.widgetWithText(FilledButton, 'Sign in'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.runAsync(() async {
+        await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
+        await Future.delayed(const Duration(milliseconds: 900));
+      });
+      await tester.pump();
 
-    // The warkari shell greets by first name and is deliberately not shown
-    // the volunteer's mesh diagnostics or activity feed.
-    expect(find.textContaining('Namaskar, Test'), findsOneWidget);
-    expect(find.text('Send SOS'), findsOneWidget);
-    expect(find.text('Recent activity'), findsNothing);
-    expect(find.text('Create or join a Dindi'), findsOneWidget);
+      // The warkari shell greets by first name and is deliberately not shown
+      // the volunteer's mesh diagnostics or activity feed.
+      expect(find.textContaining('नमस्कार, Test'), findsOneWidget);
+      expect(find.text(t.sosSend), findsOneWidget);
+      expect(find.text('Recent activity'), findsNothing);
+      expect(find.text('दिंडी तयार करा किंवा सामील व्हा'), findsOneWidget);
 
-    await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 900)));
-    await tester.pump();
-  });
+      await tester.runAsync(
+        () => Future.delayed(const Duration(milliseconds: 900)),
+      );
+      await tester.pump();
+    },
+  );
 }

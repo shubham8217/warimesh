@@ -77,7 +77,10 @@ class _ChatScreenState extends State<ChatScreen> {
     if (text.isEmpty || _sending) return;
     setState(() => _sending = true);
     final wasAdvisory = _asAdvisory;
-    final ok = await widget.mesh.sendText(text, announcement: wasAdvisory && _canAnnounce);
+    final ok = await widget.mesh.sendText(
+      text,
+      announcement: wasAdvisory && _canAnnounce,
+    );
     if (!mounted) return;
     setState(() {
       _sending = false;
@@ -86,7 +89,11 @@ class _ChatScreenState extends State<ChatScreen> {
     _scrollToEnd();
     if (!ok) {
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        const SnackBar(content: Text('Saved here, but it could not go on the air — check Bluetooth')),
+        const SnackBar(
+          content: Text(
+            'Saved here, but it could not go on the air — check Bluetooth',
+          ),
+        ),
       );
     }
   }
@@ -97,7 +104,9 @@ class _ChatScreenState extends State<ChatScreen> {
       animation: widget.mesh,
       builder: (context, _) {
         final messages = widget.mesh.messages;
-        final hasDindi = widget.profile.groupOrId.isNotEmpty && widget.profile.groupOrId != '—';
+        final hasDindi =
+            widget.profile.groupOrId.isNotEmpty &&
+            widget.profile.groupOrId != '—';
 
         return Column(
           children: [
@@ -109,7 +118,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       controller: _scroll,
                       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
                       itemCount: messages.length,
-                      itemBuilder: (context, i) => _MessageBubble(message: messages[i]),
+                      itemBuilder: (context, i) =>
+                          _MessageBubble(message: messages[i]),
                     ),
             ),
             _Composer(
@@ -139,7 +149,9 @@ class _Header extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+      color: Theme.of(
+        context,
+      ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -150,7 +162,10 @@ class _Header extends StatelessWidget {
               Expanded(
                 child: Text(
                   hasDindi ? profile.groupOrId : 'No Dindi yet',
-                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
                 ),
               ),
             ],
@@ -158,7 +173,11 @@ class _Header extends StatelessWidget {
           const SizedBox(height: 4),
           Row(
             children: [
-              Icon(Icons.lock_open, size: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              Icon(
+                Icons.lock_open,
+                size: 13,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -186,7 +205,11 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.forum_outlined, size: 52, color: Theme.of(context).colorScheme.outlineVariant),
+            Icon(
+              Icons.forum_outlined,
+              size: 52,
+              color: Theme.of(context).colorScheme.outlineVariant,
+            ),
             const SizedBox(height: 16),
             Text(
               hasDindi ? 'No messages yet' : 'Join a Dindi to start talking',
@@ -223,11 +246,15 @@ class _MessageBubble extends StatelessWidget {
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.78,
+        ),
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: mine ? AppColors.relayed.withValues(alpha: 0.15) : scheme.surfaceContainerHighest,
+          color: mine
+              ? AppColors.relayed.withValues(alpha: 0.15)
+              : scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16),
             topRight: const Radius.circular(16),
@@ -301,7 +328,10 @@ class _AdvisoryCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          Text(message.body, style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600)),
+          Text(
+            message.body,
+            style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600),
+          ),
         ],
       ),
     );
@@ -340,10 +370,17 @@ class _Composer extends StatelessWidget {
         : 1 + ((used - kTextHeadChars) / kTextPartChars).ceil();
 
     return Container(
-      padding: EdgeInsets.fromLTRB(12, 8, 12, MediaQuery.of(context).viewInsets.bottom > 0 ? 8 : 12),
+      padding: EdgeInsets.fromLTRB(
+        12,
+        8,
+        12,
+        MediaQuery.of(context).viewInsets.bottom > 0 ? 8 : 12,
+      ),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
-        border: Border(top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
+        border: Border(
+          top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+        ),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -351,7 +388,10 @@ class _Composer extends StatelessWidget {
           if (canAnnounce)
             Row(
               children: [
-                Switch(value: asAdvisory, onChanged: (v) => onToggleAdvisory(v)),
+                Switch(
+                  value: asAdvisory,
+                  onChanged: (v) => onToggleAdvisory(v),
+                ),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
@@ -359,9 +399,9 @@ class _Composer extends StatelessWidget {
                         ? 'Advisory — goes to every phone in range, not just your Dindi'
                         : 'Send as advisory to everyone in range',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: asAdvisory ? AppColors.warning : null,
-                          fontWeight: asAdvisory ? FontWeight.w700 : null,
-                        ),
+                      color: asAdvisory ? AppColors.warning : null,
+                      fontWeight: asAdvisory ? FontWeight.w700 : null,
+                    ),
                   ),
                 ),
               ],
@@ -380,14 +420,19 @@ class _Composer extends StatelessWidget {
                   onSubmitted: (_) => onSend(),
                   decoration: InputDecoration(
                     hintText: enabled ? 'Short message…' : 'Join a Dindi first',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(24)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
                     counterText: '',
                     helperText: used == 0
                         ? null
                         : over
-                            ? '$used / $kMaxTextLength — too long'
-                            : '$used / $kMaxTextLength · $fragments fragment${fragments == 1 ? '' : 's'}',
+                        ? '$used / $kMaxTextLength — too long'
+                        : '$used / $kMaxTextLength · $fragments fragment${fragments == 1 ? '' : 's'}',
                     helperStyle: TextStyle(color: over ? AppColors.sos : null),
                   ),
                 ),
@@ -397,17 +442,27 @@ class _Composer extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: 2),
                 child: IconButton.filled(
                   style: IconButton.styleFrom(
-                    backgroundColor: asAdvisory ? AppColors.warning : AppColors.relayed,
+                    backgroundColor: asAdvisory
+                        ? AppColors.warning
+                        : AppColors.relayed,
                     minimumSize: const Size(48, 48),
                   ),
-                  onPressed: (!enabled || sending || used == 0 || over) ? null : onSend,
+                  onPressed: (!enabled || sending || used == 0 || over)
+                      ? null
+                      : onSend,
                   icon: sending
                       ? const SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
                         )
-                      : Icon(asAdvisory ? Icons.campaign : Icons.send, color: Colors.white),
+                      : Icon(
+                          asAdvisory ? Icons.campaign : Icons.send,
+                          color: Colors.white,
+                        ),
                 ),
               ),
             ],

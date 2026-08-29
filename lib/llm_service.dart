@@ -41,15 +41,14 @@ const String kLlmReleaseBaseUrl =
     'https://github.com/RohitSwami33/Warimesh1/releases/download/gemma-3n-e2b-v1';
 const int kLlmModelParts = 4;
 const int kLlmModelPartBytes = 913956864; // every chunk is exactly this size
-const int kLlmModelTotalBytes = 3655827456; // assembled size; verified after download
+const int kLlmModelTotalBytes =
+    3655827456; // assembled size; verified after download
 const String kLlmModelFallbackUrl =
     'https://modelscope.cn/models/google/gemma-3n-E2B-it-litert-lm/resolve/master/gemma-3n-E2B-it-int4.litertlm';
 
 class LlmService extends ChangeNotifier {
-  static const MethodChannel _method =
-      MethodChannel('warimesh/llm');
-  static const EventChannel _events =
-      EventChannel('warimesh/llm/events');
+  static const MethodChannel _method = MethodChannel('warimesh/llm');
+  static const EventChannel _events = EventChannel('warimesh/llm/events');
 
   LlmService({this.mesh, this.volunteerName});
 
@@ -201,8 +200,7 @@ class LlmService extends ChangeNotifier {
       final request = await client.getUrl(Uri.parse(url));
       final response = await request.close();
       if (response.statusCode != 200) {
-        _lastError =
-            'Fallback download failed (HTTP ${response.statusCode}).';
+        _lastError = 'Fallback download failed (HTTP ${response.statusCode}).';
         return false;
       }
       final total = response.contentLength;
@@ -253,7 +251,9 @@ class LlmService extends ChangeNotifier {
 
   Future<void> refreshModelInfo() async {
     try {
-      final info = await _method.invokeMethod<Map<Object?, Object?>>('getModelInfo');
+      final info = await _method.invokeMethod<Map<Object?, Object?>>(
+        'getModelInfo',
+      );
       _modelExists = info?['exists'] == true;
       _modelPath = info?['path'] as String?;
       _modelSizeBytes = (info?['sizeBytes'] as num?)?.toInt() ?? 0;
@@ -262,7 +262,9 @@ class LlmService extends ChangeNotifier {
       // before the user taps Load).
       _status = !_modelExists
           ? LlmStatus.noModel
-          : (_status == LlmStatus.ready ? LlmStatus.ready : LlmStatus.downloaded);
+          : (_status == LlmStatus.ready
+                ? LlmStatus.ready
+                : LlmStatus.downloaded);
     } on PlatformException catch (e) {
       _lastError = e.message;
       _status = LlmStatus.error;
@@ -298,7 +300,10 @@ class LlmService extends ChangeNotifier {
   /// null if the request could not start. Token events arrive on the event
   /// channel; [onDelta] (optional) is called with each partial token for
   /// live typing UI.
-  Future<String?> generate(String prompt, {void Function(String partial)? onDelta}) async {
+  Future<String?> generate(
+    String prompt, {
+    void Function(String partial)? onDelta,
+  }) async {
     if (!canChat) return null;
     _busy = true;
     _currentRequestId = 'req${_requestCounter++}';
@@ -329,7 +334,8 @@ class LlmService extends ChangeNotifier {
       _lastError = e.message;
       return null;
     } on TimeoutException {
-      _lastError = 'Response timed out — the model may be busy or the phone is thermal-throttling.';
+      _lastError =
+          'Response timed out — the model may be busy or the phone is thermal-throttling.';
       return null;
     } finally {
       _pendingCompleter = null;
@@ -361,15 +367,29 @@ class LlmService extends ChangeNotifier {
       // That is the "it replies with the system prompt" bug, and no amount
       // of rewording the instructions fixes it: the turn markers do.
       ..writeln('<start_of_turn>user')
-      ..writeln('You are the WariMesh assistant, an offline field companion on a phone at a walking pilgrimage (the Wari). You help VOLUNTEERS and WARKARIS (pilgrims) in emergencies when there is no mobile network and no healthcare worker nearby.')
+      ..writeln(
+        'You are the WariMesh assistant, an offline field companion on a phone at a walking pilgrimage (the Wari). You help VOLUNTEERS and WARKARIS (pilgrims) in emergencies when there is no mobile network and no healthcare worker nearby.',
+      )
       ..writeln()
       ..writeln('Your job:')
-      ..writeln('- Answer queries about first aid and emergencies: snake bites, heat stroke, dehydration, dizziness, exhaustion, wounds, insect stings, and similar.')
-      ..writeln('- Respond with the IMMEDIATE steps to take, in short numbered points.')
-      ..writeln('- Always end with: contact a healthcare worker ASAP. These are only immediate first-aid suggestions, not professional medical advice.')
-      ..writeln('- Keep answers short, calm, and practical. Use simple language.')
-      ..writeln('- If asked anything unrelated to the pilgrimage/emergency context, briefly answer and steer back to safety.')
-      ..writeln('- Never claim to be a doctor. Always remind that professional help is needed as soon as possible.');
+      ..writeln(
+        '- Answer queries about first aid and emergencies: snake bites, heat stroke, dehydration, dizziness, exhaustion, wounds, insect stings, and similar.',
+      )
+      ..writeln(
+        '- Respond with the IMMEDIATE steps to take, in short numbered points.',
+      )
+      ..writeln(
+        '- Always end with: contact a healthcare worker ASAP. These are only immediate first-aid suggestions, not professional medical advice.',
+      )
+      ..writeln(
+        '- Keep answers short, calm, and practical. Use simple language.',
+      )
+      ..writeln(
+        '- If asked anything unrelated to the pilgrimage/emergency context, briefly answer and steer back to safety.',
+      )
+      ..writeln(
+        '- Never claim to be a doctor. Always remind that professional help is needed as soon as possible.',
+      );
 
     final name = volunteerName?.trim();
     if (name != null && name.isNotEmpty) {
@@ -384,7 +404,9 @@ class LlmService extends ChangeNotifier {
       b.writeln('- bluetooth on: ${m.bluetoothOn}');
       b.writeln('- messages seen: ${m.seenCount}');
       if (m.log.isNotEmpty) {
-        b.writeln('- recent activity: ${m.log.take(5).map((e) => e.text).join(' | ')}');
+        b.writeln(
+          '- recent activity: ${m.log.take(5).map((e) => e.text).join(' | ')}',
+        );
       }
     }
 
@@ -394,7 +416,9 @@ class LlmService extends ChangeNotifier {
       if (active.isNotEmpty) {
         b.writeln('Active missing-person reports on this phone:');
         for (final r in active.take(5)) {
-          b.writeln('- ${r.name} (${r.age.isEmpty ? 'age unknown' : r.age}): ${r.description} — last seen: ${r.lastSeenLocation.isEmpty ? 'unknown' : r.lastSeenLocation}');
+          b.writeln(
+            '- ${r.name} (${r.age.isEmpty ? 'age unknown' : r.age}): ${r.description} — last seen: ${r.lastSeenLocation.isEmpty ? 'unknown' : r.lastSeenLocation}',
+          );
         }
       } else {
         b.writeln('No active missing-person reports on this phone.');

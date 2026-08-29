@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'l10n/app_strings.dart';
 import 'models.dart';
 
 class NotificationService {
@@ -80,14 +81,14 @@ class NotificationService {
       // The reason is the whole point of putting it on the lock screen:
       // "Rahul needs help" tells a volunteer to go, "Rahul — Medical" tells
       // them what to bring. See kSosReason* in models.dart.
-      body = '$from — ${sosReasonLabel(reason)}$where';
+      body = '$from — ${t.sosReason(reason)}$where';
     } else if (isSos) {
-      body = '$from needs help$where';
+      body = '$from यांना मदत हवी आहे$where';
     } else if (lostName != null && lostName.isNotEmpty) {
-      final age = (lostAge == null || lostAge.isEmpty) ? '' : ', age $lostAge';
-      body = 'Look for $lostName$age — reported by $from$where';
+      final age = (lostAge == null || lostAge.isEmpty) ? '' : ', वय $lostAge';
+      body = '$lostName$age यांना शोधा — $from यांनी कळवले$where';
     } else {
-      body = '$from reported someone missing nearby$where';
+      body = '$from यांनी जवळपास कोणीतरी हरवल्याचे कळवले$where';
     }
 
     await _plugin.show(
@@ -95,10 +96,10 @@ class NotificationService {
       // and can exceed that, so fold it down instead of passing it raw.
       id: packet.msgId % 100000,
       title: !isSos
-          ? '🔎 Missing person nearby'
+          ? '🔎 जवळपास कोणीतरी हरवले आहे'
           : sosReasonIsSpecific(reason)
-          ? '${sosReasonEmoji(reason)} ${sosReasonLabel(reason).toUpperCase()} SOS'
-          : '🆘 SOS RECEIVED',
+          ? '${sosReasonEmoji(reason)} ${t.sosReason(reason)} — SOS'
+          : '🆘 SOS आला आहे',
       body: body,
       notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
@@ -148,7 +149,7 @@ class NotificationService {
       // never replace an SOS notification that happens to fold to the same
       // number.
       id: 100000 + (message.msgId % 100000),
-      title: '📢 Advisory from ${message.displayName}',
+      title: '📢 सूचना — ${message.displayName}',
       body: message.body,
       notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
@@ -179,8 +180,8 @@ class NotificationService {
       // Its own fixed id: a second responder replaces the first rather than
       // stacking, and this can never collide with an alert notification.
       id: 900001,
-      title: 'Help is coming',
-      body: '$who is responding to your alert.',
+      title: 'मदत येत आहे',
+      body: '$who मदतीसाठी येत आहेत.',
       notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
@@ -206,15 +207,15 @@ class NotificationService {
   /// child. Also like it, this is dismissible — it is news, not a summons.
   static Future<void> showPersonSpotted(String who, {String? lostName}) async {
     final subject = (lostName == null || lostName.isEmpty)
-        ? 'the person you reported missing'
+        ? 'तुम्ही कळवलेली हरवलेली व्यक्ती'
         : lostName;
     await _plugin.show(
       // Its own fixed id, next to showResponderComing's, so a sighting
       // replaces the previous sighting rather than stacking and can never
       // collide with an alert notification.
       id: 900002,
-      title: '👀 Sighting reported',
-      body: '$who reported seeing $subject.',
+      title: '👀 वारकरी दिसला',
+      body: '$who यांना $subject दिसले.',
       notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,

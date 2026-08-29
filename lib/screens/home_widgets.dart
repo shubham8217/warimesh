@@ -8,6 +8,7 @@
 // can't drift apart again.
 import 'package:flutter/material.dart';
 
+import '../l10n/app_strings.dart';
 import '../mesh_service.dart';
 import '../models.dart';
 import '../theme.dart';
@@ -174,7 +175,7 @@ class NearbySevaCard extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                'Listening for nearby seva...',
+                t.listeningForSeva,
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
@@ -198,14 +199,14 @@ class NearbySevaCard extends StatelessWidget {
                 ),
               ),
               title: Text(
-                point.label,
+                t.station(point.helpType),
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${helpStatusLabel(point.status)} · ${point.freshnessLabel}',
+                    '${t.helpStatus(point.status)} · ${t.ageLabel(point.receivedAt)}',
                     style: Theme.of(
                       context,
                     ).textTheme.bodySmall?.copyWith(color: muted),
@@ -213,7 +214,11 @@ class NearbySevaCard extends StatelessWidget {
                   // Where it is, or the honest reason there is no distance.
                   // See HelpPointRecord.whereLabel — never fabricated.
                   Text(
-                    point.whereLabel,
+                    t.whereLabel(
+                      hasLocation: point.hasLocation,
+                      distanceMetres: point.distanceMetres,
+                      bearingDegrees: point.bearingDegrees,
+                    ),
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: point.distanceLabel == null
                           ? muted
@@ -268,25 +273,23 @@ class MyAlertCard extends StatelessWidget {
     final String headline;
     final String detail;
     if (alert.isResolved) {
-      headline = 'Closed';
+      headline = t.statusClosed;
       detail =
-          '${resolveReasonLabel(alert.resolvedReason ?? kResolveHandled)}'
-          ' — your ${alert.title.toLowerCase()} from ${alert.ageLabel} is finished.';
+          'तुमची ${t.ageLabel(alert.receivedAt)} पाठवलेली सूचना पूर्ण झाली आहे.';
     } else if (alert.isClaimed) {
-      headline = 'Help is coming';
+      headline = t.helpIsComing;
       final role = roleFor?.call(alert.claimedBy!);
       final who = role == null
           ? nameFor(alert.claimedBy!)
           : '${nameFor(alert.claimedBy!)} · $role';
-      final verb = role == null
-          ? 'is responding to'
-          : '${responderVerb(role)} on';
-      detail = '$who $verb your ${alert.title.toLowerCase()}.';
+      detail = role == null
+          ? '$who तुमच्या सूचनेला प्रतिसाद देत आहे.'
+          : '$who · $role ${t.responderVerbFor(role)}.';
     } else {
-      headline = 'Your alert is out';
+      headline = t.yourAlertIsOut;
       detail =
-          'Sent ${alert.ageLabel}. Nearby phones are passing it on. '
-          'You will be told the moment someone responds.';
+          '${t.ageLabel(alert.receivedAt)} पाठवली. जवळचे फोन ती पुढे पोहोचवत आहेत. '
+          'कोणी प्रतिसाद देताच तुम्हाला कळवले जाईल.';
     }
 
     return Container(
@@ -360,8 +363,8 @@ class _PropagationChecklist extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _CheckLine(text: 'Alert propagated to your Dindi', muted: muted),
-        _CheckLine(text: 'Alert propagated to nearby volunteers', muted: muted),
+        _CheckLine(text: t.sosPropagatedDindi, muted: muted),
+        _CheckLine(text: t.sosPropagatedVolunteers, muted: muted),
       ],
     );
   }
@@ -444,8 +447,8 @@ class AdvisoriesCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       advisories.length == 1
-                          ? 'Advisory'
-                          : '${advisories.length} advisories',
+                          ? t.advisory
+                          : t.advisoryCount(advisories.length),
                       style: const TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 16,
@@ -458,7 +461,7 @@ class AdvisoriesCard extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                'From volunteers along the route.',
+                t.advisoriesFromVolunteers,
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: muted),
@@ -490,7 +493,7 @@ class AdvisoriesCard extends StatelessWidget {
               if (more > 0) ...[
                 const SizedBox(height: 8),
                 Text(
-                  '+$more more — tap to read',
+                  t.moreTapToRead(more),
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 12.5,
@@ -561,8 +564,8 @@ class RelevantSevaCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   shown.length == 1
-                      ? '${shown.first.label} Seva nearby'
-                      : 'Seva nearby',
+                      ? '${t.station(shown.first.helpType)} जवळ आहे'
+                      : t.nearbySeva,
                   style: const TextStyle(
                     fontWeight: FontWeight.w800,
                     fontSize: 16,
@@ -574,7 +577,7 @@ class RelevantSevaCard extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            'Discovered through WariMesh — no internet involved.',
+            t.sevaDiscoveredThroughMesh,
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: muted),
@@ -606,19 +609,23 @@ class RelevantSevaCard extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                point.label,
+                                t.station(point.helpType),
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
                               Text(
-                                '${helpStatusLabel(point.status)} · ${point.freshnessLabel}',
+                                '${t.helpStatus(point.status)} · ${t.ageLabel(point.receivedAt)}',
                                 style: Theme.of(
                                   context,
                                 ).textTheme.bodySmall?.copyWith(color: muted),
                               ),
                               Text(
-                                point.whereLabel,
+                                t.whereLabel(
+                                  hasLocation: point.hasLocation,
+                                  distanceMetres: point.distanceMetres,
+                                  bearingDegrees: point.bearingDegrees,
+                                ),
                                 style: Theme.of(context).textTheme.bodySmall
                                     ?.copyWith(
                                       color: point.distanceLabel == null
@@ -632,8 +639,8 @@ class RelevantSevaCard extends StatelessWidget {
                             ],
                           ),
                         ),
-                        const Text(
-                          'VIEW',
+                        Text(
+                          t.view,
                           style: TextStyle(
                             fontWeight: FontWeight.w800,
                             fontSize: 12,
@@ -684,9 +691,9 @@ class DindiEmergenciesSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SectionHeader(
-          title: 'Dindi Emergencies',
+          title: t.dindiEmergencies,
           trailing: StatusPill(
-            text: '${emergencies.length}',
+            text: mrNum(emergencies.length),
             color: AppColors.sos,
             icon: Icons.sos,
           ),
@@ -729,9 +736,9 @@ class DindiEmergencyCard extends StatelessWidget {
   /// "Unattended" — a Lead reading it should see the word that matches what
   /// is going on, not a generic status.
   String get _statusText {
-    if (alert.isSpotted) return 'Spotted';
-    if (alert.isClaimed) return 'Taken';
-    return alert.isSos ? 'Unattended' : 'Searching';
+    if (alert.isSpotted) return t.statusSpotted;
+    if (alert.isClaimed) return t.statusTaken;
+    return alert.isSos ? t.statusUnattended : t.statusSearching;
   }
 
   Color get _statusColor {
@@ -773,9 +780,7 @@ class DindiEmergencyCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  alert.isSos
-                      ? 'SOS FROM YOUR DINDI'
-                      : 'MISSING WARKARI FROM YOUR DINDI',
+                  alert.isSos ? t.sosFromYourDindi : t.missingFromYourDindi,
                   style: const TextStyle(
                     fontWeight: FontWeight.w800,
                     fontSize: 15,
@@ -795,7 +800,7 @@ class DindiEmergencyCard extends StatelessWidget {
           if (alert.reasonLabel != null) ...[
             const SizedBox(height: 8),
             Text(
-              '${alert.reasonEmoji}  ${alert.reasonLabel}',
+              '${alert.reasonEmoji}  ${t.sosReason(alert.reason)}',
               style: const TextStyle(
                 fontWeight: FontWeight.w800,
                 fontSize: 17,
@@ -805,12 +810,12 @@ class DindiEmergencyCard extends StatelessWidget {
           ],
           const SizedBox(height: 10),
           if (!alert.isSos && alert.lostSummary != null)
-            _Field(label: 'Looking for', value: alert.lostSummary!),
-          _Field(label: 'Member', value: who),
-          _Field(label: 'Dindi', value: dindiName),
-          _Field(label: 'Location', value: _locationText()),
+            _Field(label: t.lookingFor, value: alert.lostSummary!),
+          _Field(label: t.member, value: who),
+          _Field(label: t.dindi, value: dindiName),
+          _Field(label: 'ठिकाण', value: _locationText()),
           _Field(
-            label: 'Time',
+            label: 'वेळ',
             value: TimeOfDay.fromDateTime(alert.receivedAt).format(context),
           ),
           if (alert.isSpotted) SpottedLine(alert: alert, mesh: mesh),
@@ -821,7 +826,7 @@ class DindiEmergencyCard extends StatelessWidget {
                 final role = mesh.responderRoleLabelFor(alert.claimedBy!);
                 final name = mesh.nameFor(alert.claimedBy!) ?? alert.claimedBy!;
                 return Text(
-                  '$name · $role ${responderVerb(role)}',
+                  '$name · $role ${t.responderVerbFor(role)}',
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
                     color: AppColors.warning,
@@ -847,7 +852,7 @@ class DindiEmergencyCard extends StatelessWidget {
                     onPressed: () =>
                         mesh.resolveAlert(alert, reason: kResolveFound),
                     icon: const Icon(Icons.check_circle_outline, size: 18),
-                    label: const Text('FOUND'),
+                    label: Text(t.found),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -855,7 +860,7 @@ class DindiEmergencyCard extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: () => mesh.reportSpotted(alert),
                     icon: const Icon(Icons.visibility_outlined, size: 18),
-                    label: const Text('SPOTTED'),
+                    label: Text(t.spotted),
                   ),
                 ),
               ],
@@ -869,7 +874,7 @@ class DindiEmergencyCard extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: onCoordinate,
                     icon: const Icon(Icons.forum_outlined, size: 18),
-                    label: const Text('COORDINATE'),
+                    label: Text(t.coordinate),
                   ),
                 )
               else if (!claimed)
@@ -880,7 +885,7 @@ class DindiEmergencyCard extends StatelessWidget {
                     ),
                     onPressed: () => mesh.claimAlert(alert),
                     icon: const Icon(Icons.pan_tool_alt, size: 18),
-                    label: const Text('RESPOND'),
+                    label: Text(t.respond),
                   ),
                 )
               else if (!alert.claimedByMe(mesh.myMeshId))
@@ -888,7 +893,7 @@ class DindiEmergencyCard extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: () => mesh.claimAlert(alert),
                     icon: const Icon(Icons.group_add_outlined, size: 18),
-                    label: const Text('Join anyway'),
+                    label: Text(t.joinAnyway),
                   ),
                 )
               else
@@ -896,7 +901,7 @@ class DindiEmergencyCard extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: () => mesh.resolveAlert(alert),
                     icon: const Icon(Icons.check, size: 18),
-                    label: const Text('Close'),
+                    label: Text(t.closeAlert),
                   ),
                 ),
               // A missing-person case already offered COORDINATE as its own
@@ -908,7 +913,7 @@ class DindiEmergencyCard extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: onCoordinate,
                     icon: const Icon(Icons.forum_outlined, size: 18),
-                    label: const Text('COORDINATE'),
+                    label: Text(t.coordinate),
                   ),
                 ),
               ],
@@ -916,7 +921,7 @@ class DindiEmergencyCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Reached you ${alert.hops == 0 ? "directly" : "via ${alert.hops} relay${alert.hops == 1 ? '' : 's'}"} · ${alert.ageLabel}',
+            '${t.relayedThrough(alert.hops)} · ${t.ageLabel(alert.receivedAt)}',
             style: Theme.of(
               context,
             ).textTheme.bodySmall?.copyWith(color: muted, fontSize: 11.5),
@@ -930,15 +935,11 @@ class DindiEmergencyCard extends StatelessWidget {
   /// direction only appear once a LocationPacket has actually arrived and
   /// this phone knows its own position; otherwise this says so plainly.
   String _locationText() {
-    final distance = alert.distanceLabel;
-    final direction = alert.directionLabel;
-    if (distance != null && direction != null) {
-      return '$distance, to your $direction';
-    }
-    if (alert.hasLocation) {
-      return 'Position known, no fix on this phone to measure from';
-    }
-    return 'Location unavailable';
+    return t.whereLabel(
+      hasLocation: alert.hasLocation,
+      distanceMetres: alert.distanceMetres,
+      bearingDegrees: alert.bearingDegrees,
+    );
   }
 }
 
@@ -962,9 +963,6 @@ class SpottedLine extends StatelessWidget {
     if (by == null) return const SizedBox.shrink();
     final who = by == mesh.myMeshId ? 'You' : (mesh.nameFor(by) ?? by);
     final at = alert.spottedAt;
-    final when = at == null
-        ? ''
-        : ' · ${TimeOfDay.fromDateTime(at).format(context)}';
 
     return Padding(
       padding: const EdgeInsets.only(top: 8),
@@ -984,7 +982,12 @@ class SpottedLine extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '$who reported seeing them$when',
+                    t.spottedBy(
+                      who,
+                      at == null
+                          ? null
+                          : TimeOfDay.fromDateTime(at).format(context),
+                    ),
                     style: const TextStyle(
                       fontWeight: FontWeight.w700,
                       color: AppColors.warning,
@@ -996,8 +999,8 @@ class SpottedLine extends StatelessWidget {
                   // this stretch of route — and says exactly that.
                   Text(
                     alert.hasSpottedLocation
-                        ? 'Position sent with the sighting'
-                        : 'No position sent with the sighting',
+                        ? t.positionSentWithSighting
+                        : t.noPositionWithSighting,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                       fontSize: 11.5,
@@ -1143,7 +1146,7 @@ class DindiCard extends StatelessWidget {
               ),
               const SizedBox(height: 18),
               Text(
-                'MEMBERS NEARBY',
+                t.membersNearby,
                 style: Theme.of(sheetContext).textTheme.labelSmall?.copyWith(
                   fontWeight: FontWeight.w700,
                   letterSpacing: 0.8,
@@ -1151,7 +1154,7 @@ class DindiCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 6),
-              MemberTile(name: 'You', isYou: true),
+              MemberTile(name: 'तुम्ही', isYou: true),
               ...memberNames.map((name) => MemberTile(name: name)),
               if (memberNames.isEmpty)
                 Padding(
@@ -1176,21 +1179,20 @@ class DindiCard extends StatelessWidget {
                     Navigator.of(sheetContext).pop();
                     onDindiLeadChanged!(v);
                   },
-                  title: const Text(
-                    'I am the Dindi Lead',
-                    style: TextStyle(fontWeight: FontWeight.w700),
+                  title: Text(
+                    t.iAmDindiLead,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
-                  subtitle: const Text(
-                    'An SOS from this Dindi will be shown to you as a Dindi Emergency, '
-                    'so you can respond or coordinate.',
-                    style: TextStyle(fontSize: 12.5),
+                  subtitle: Text(
+                    t.iAmDindiLeadDetail,
+                    style: const TextStyle(fontSize: 12.5),
                   ),
                 ),
               ],
               const SizedBox(height: 8),
               OutlinedButton.icon(
                 icon: const Icon(Icons.swap_horiz),
-                label: const Text('Join a different Dindi'),
+                label: const Text('दुसऱ्या दिंडीत सामील व्हा'),
                 onPressed: () async {
                   Navigator.of(sheetContext).pop();
                   final name = await showDindiSheet(
@@ -1204,7 +1206,7 @@ class DindiCard extends StatelessWidget {
               TextButton.icon(
                 style: TextButton.styleFrom(foregroundColor: AppColors.sos),
                 icon: const Icon(Icons.logout, size: 18),
-                label: const Text('Leave Dindi'),
+                label: const Text('दिंडी सोडा'),
                 onPressed: () {
                   Navigator.of(sheetContext).pop();
                   onDindiChanged('—');
@@ -1249,7 +1251,7 @@ class DindiCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _hasDindi ? groupOrId : 'Create or join a Dindi',
+                      _hasDindi ? groupOrId : 'दिंडी तयार करा किंवा सामील व्हा',
                       style: TextStyle(
                         color: color,
                         fontWeight: FontWeight.w800,
@@ -1382,10 +1384,10 @@ class StatusBox extends StatelessWidget {
           Expanded(
             child: Text(
               !bluetoothOn
-                  ? 'Bluetooth is off — turn it on to reach nearby phones'
+                  ? t.bluetoothOff
                   : scanningOk
-                  ? 'Connected to the mesh — nearby phones can hear you'
-                  : 'Not connected yet',
+                  ? t.meshConnected
+                  : t.meshNotConnected,
               style: TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 13.5,

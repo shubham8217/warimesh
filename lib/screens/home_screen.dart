@@ -17,6 +17,7 @@
 // this screen is for.
 import 'package:flutter/material.dart';
 
+import '../l10n/app_strings.dart';
 import '../mesh_service.dart';
 import '../models.dart';
 import '../theme.dart';
@@ -300,24 +301,19 @@ class DutyCard extends StatelessWidget {
       context: context,
       builder: (dialogContext) => AlertDialog(
         icon: Icon(_icons[newStation], color: AppColors.relayed, size: 32),
-        title: Text('Announce ${stationLabel(newStation)} Help'),
-        content: Text(
-          '${stationAnnounceLabel(newStation)} will be visible to nearby WariMesh '
-          'users — including phones out of direct range, relayed hop by hop.\n\n'
-          // Said plainly at the moment of choosing, because this is the one
-          // place a volunteer decides to publish where they are standing.
-          'Your position goes out with it, so people can be told which way '
-          'to walk. A Bluetooth broadcast is public — anyone in range can '
-          'read it.',
-        ),
+        title: Text('${t.station(newStation)} जाहीर करायची?'),
+        // Says plainly, at the moment of choosing, that the position goes
+        // out — this is the one place a volunteer decides to publish
+        // where they are standing.
+        content: Text(t.announceConfirmBody(t.station(newStation))),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
+            child: Text(t.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Announce'),
+            child: Text(t.announce),
           ),
         ],
       ),
@@ -326,11 +322,7 @@ class DutyCard extends StatelessWidget {
     onStationChanged(newStation);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${stationLabel(newStation)} help point is now visible to nearby WariMesh users.',
-          ),
-        ),
+        SnackBar(content: Text(t.helpPointNowVisible(t.station(newStation)))),
       );
     }
   }
@@ -364,7 +356,7 @@ class DutyCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        onDuty ? stationLabel(station) : 'Not at a help point',
+                        onDuty ? t.station(station) : t.notAtHelpPoint,
                         style: const TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 17,
@@ -372,9 +364,7 @@ class DutyCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        onDuty
-                            ? 'Pilgrims in range can see help is here'
-                            : 'Tap to announce a help point',
+                        onDuty ? t.pilgrimsCanSeeHelp : t.tapToAnnounce,
                         style: Theme.of(
                           context,
                         ).textTheme.bodySmall?.copyWith(color: muted),
@@ -387,10 +377,10 @@ class DutyCard extends StatelessWidget {
                     onPressed: () {
                       onStationChanged(kStationNone);
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Help point closed.')),
+                        SnackBar(content: Text(t.helpPointClosed)),
                       );
                     },
-                    child: const Text('Off duty'),
+                    child: Text(t.offDuty),
                   ),
               ],
             ),
@@ -402,7 +392,7 @@ class DutyCard extends StatelessWidget {
                 for (final s in kStationTypes.where((s) => s != kStationNone))
                   ChoiceChip(
                     avatar: Icon(_icons[s], size: 17),
-                    label: Text(stationLabel(s)),
+                    label: Text(t.station(s)),
                     selected: station == s,
                     onSelected: (sel) {
                       if (!sel) {

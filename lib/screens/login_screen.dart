@@ -22,7 +22,12 @@ class LoginScreen extends StatefulWidget {
   final UserRole role;
   final ValueChanged<UserProfile> onLoggedIn;
   final VoidCallback onBack;
-  const LoginScreen({super.key, required this.role, required this.onLoggedIn, required this.onBack});
+  const LoginScreen({
+    super.key,
+    required this.role,
+    required this.onLoggedIn,
+    required this.onBack,
+  });
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -55,7 +60,9 @@ class _LoginScreenState extends State<LoginScreen> {
       role: widget.role,
       // A warkari picks their Dindi later, on the Home screen — starts
       // unset. A volunteer's camp/ID is still collected here.
-      groupOrId: _isWarkari ? '—' : (_groupOrId.text.trim().isEmpty ? '—' : _groupOrId.text.trim()),
+      groupOrId: _isWarkari
+          ? '—'
+          : (_groupOrId.text.trim().isEmpty ? '—' : _groupOrId.text.trim()),
       meshId: generateMeshId(widget.role),
       loggedInAt: DateTime.now(),
     );
@@ -118,25 +125,35 @@ class _LoginScreenState extends State<LoginScreen> {
                 '${widget.role.label} sign-in',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const SizedBox(height: 32),
               TextFormField(
                 controller: _name,
-                decoration: const InputDecoration(labelText: 'Full name', prefixIcon: Icon(Icons.person_outline)),
+                decoration: const InputDecoration(
+                  labelText: 'Full name',
+                  prefixIcon: Icon(Icons.person_outline),
+                ),
                 textInputAction: TextInputAction.next,
                 textCapitalization: TextCapitalization.words,
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Your name is required' : null,
+                validator: (v) => (v == null || v.trim().isEmpty)
+                    ? 'Your name is required'
+                    : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _phone,
-                decoration: const InputDecoration(labelText: 'Phone number', prefixIcon: Icon(Icons.call_outlined)),
+                decoration: const InputDecoration(
+                  labelText: 'Phone number',
+                  prefixIcon: Icon(Icons.call_outlined),
+                ),
                 keyboardType: TextInputType.phone,
                 textInputAction: TextInputAction.next,
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'A phone number is required' : null,
+                validator: (v) => (v == null || v.trim().isEmpty)
+                    ? 'A phone number is required'
+                    : null,
               ),
               if (!_isWarkari) ...[
                 const SizedBox(height: 12),
@@ -180,7 +197,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     ? const SizedBox(
                         width: 18,
                         height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       )
                     : const Icon(Icons.login),
                 label: Text(_saving ? 'Signing in…' : 'Sign in'),

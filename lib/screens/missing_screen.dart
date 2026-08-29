@@ -51,13 +51,18 @@ class _MissingScreenState extends State<MissingScreen> {
     final found = _reports.where((r) => r.found).toList();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Missing persons'), automaticallyImplyLeading: false),
+      appBar: AppBar(
+        title: const Text('Missing persons'),
+        automaticallyImplyLeading: false,
+      ),
       floatingActionButton: FloatingActionButton.extended(
         icon: const Icon(Icons.add),
         label: const Text('Report someone missing'),
         onPressed: () async {
           final saved = await Navigator.of(context).push<bool>(
-            MaterialPageRoute(builder: (_) => ReportFormScreen(mesh: widget.mesh)),
+            MaterialPageRoute(
+              builder: (_) => ReportFormScreen(mesh: widget.mesh),
+            ),
           );
           if (saved == true) _load();
         },
@@ -65,34 +70,50 @@ class _MissingScreenState extends State<MissingScreen> {
       body: !_loaded
           ? const Center(child: CircularProgressIndicator())
           : _reports.isEmpty
-              ? _EmptyState(onAdd: () async {
-                  final saved = await Navigator.of(context).push<bool>(
-                    MaterialPageRoute(builder: (_) => ReportFormScreen(mesh: widget.mesh)),
-                  );
-                  if (saved == true) _load();
-                })
-              : ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-                  children: [
-                    if (active.isNotEmpty) ...[
-                      Text('Active (${active.length})', style: Theme.of(context).textTheme.titleSmall),
-                      const SizedBox(height: 8),
-                      ...active.map((r) => _ReportCard(report: r, onTap: () => _openDetail(r))),
-                    ],
-                    if (found.isNotEmpty) ...[
-                      const SizedBox(height: 20),
-                      Text('Found (${found.length})', style: Theme.of(context).textTheme.titleSmall),
-                      const SizedBox(height: 8),
-                      ...found.map((r) => _ReportCard(report: r, onTap: () => _openDetail(r))),
-                    ],
-                  ],
-                ),
+          ? _EmptyState(
+              onAdd: () async {
+                final saved = await Navigator.of(context).push<bool>(
+                  MaterialPageRoute(
+                    builder: (_) => ReportFormScreen(mesh: widget.mesh),
+                  ),
+                );
+                if (saved == true) _load();
+              },
+            )
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+              children: [
+                if (active.isNotEmpty) ...[
+                  Text(
+                    'Active (${active.length})',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  ...active.map(
+                    (r) => _ReportCard(report: r, onTap: () => _openDetail(r)),
+                  ),
+                ],
+                if (found.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  Text(
+                    'Found (${found.length})',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  ...found.map(
+                    (r) => _ReportCard(report: r, onTap: () => _openDetail(r)),
+                  ),
+                ],
+              ],
+            ),
     );
   }
 
   Future<void> _openDetail(LostReport r) async {
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => LostPersonDetailScreen(mesh: widget.mesh, report: r)),
+      MaterialPageRoute(
+        builder: (_) => LostPersonDetailScreen(mesh: widget.mesh, report: r),
+      ),
     );
     _load();
   }
@@ -116,28 +137,58 @@ class _ReportCard extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                LostPersonAvatar(iconIndex: report.avatarIconIndex, colorIndex: report.avatarColorIndex, found: report.found),
+                LostPersonAvatar(
+                  iconIndex: report.avatarIconIndex,
+                  colorIndex: report.avatarColorIndex,
+                  found: report.found,
+                ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('${report.name} · ${report.age}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                      Text(
+                        '${report.name} · ${report.age}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                        ),
+                      ),
                       const SizedBox(height: 4),
-                      Text(report.description, maxLines: 2, overflow: TextOverflow.ellipsis),
+                      Text(
+                        report.description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                       const SizedBox(height: 8),
                       Wrap(
                         spacing: 8,
                         runSpacing: 6,
                         children: [
                           if (report.found)
-                            const StatusPill(text: 'FOUND', color: AppColors.relayed, icon: Icons.check_circle)
+                            const StatusPill(
+                              text: 'FOUND',
+                              color: AppColors.relayed,
+                              icon: Icons.check_circle,
+                            )
                           else if (report.broadcastAt != null)
-                            const StatusPill(text: 'BROADCAST', color: AppColors.lostPerson, icon: Icons.podcasts)
+                            const StatusPill(
+                              text: 'BROADCAST',
+                              color: AppColors.lostPerson,
+                              icon: Icons.podcasts,
+                            )
                           else
-                            const StatusPill(text: 'NOT BROADCAST', color: AppColors.warning, icon: Icons.drafts),
+                            const StatusPill(
+                              text: 'NOT BROADCAST',
+                              color: AppColors.warning,
+                              icon: Icons.drafts,
+                            ),
                           if (report.lastSeenLocation.isNotEmpty)
-                            StatusPill(text: report.lastSeenLocation, color: Colors.grey.shade700, icon: Icons.place_outlined),
+                            StatusPill(
+                              text: report.lastSeenLocation,
+                              color: Colors.grey.shade700,
+                              icon: Icons.place_outlined,
+                            ),
                         ],
                       ),
                     ],
@@ -165,9 +216,17 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.person_search, size: 56, color: Theme.of(context).colorScheme.outline),
+            Icon(
+              Icons.person_search,
+              size: 56,
+              color: Theme.of(context).colorScheme.outline,
+            ),
             const SizedBox(height: 16),
-            Text('No missing-person reports yet', style: Theme.of(context).textTheme.titleMedium, textAlign: TextAlign.center),
+            Text(
+              'No missing-person reports yet',
+              style: Theme.of(context).textTheme.titleMedium,
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 8),
             Text(
               'Add a name, description, and last-seen location so nearby responders know who to look for.',
@@ -175,7 +234,11 @@ class _EmptyState extends StatelessWidget {
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 20),
-            FilledButton.icon(onPressed: onAdd, icon: const Icon(Icons.add), label: const Text('Report someone missing')),
+            FilledButton.icon(
+              onPressed: onAdd,
+              icon: const Icon(Icons.add),
+              label: const Text('Report someone missing'),
+            ),
           ],
         ),
       ),

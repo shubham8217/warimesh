@@ -6,6 +6,7 @@
 import 'package:flutter/material.dart';
 
 import '../database_service.dart';
+import '../l10n/app_strings.dart';
 import '../mesh_service.dart';
 import '../models.dart';
 import '../theme.dart';
@@ -89,7 +90,7 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
-                  'Namaskar, ${widget.warkari.name.split(' ').first}',
+                  'नमस्कार, ${widget.warkari.name.split(' ').first}',
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -97,7 +98,7 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
           ),
           actions: [
             PopupMenuButton<String>(
-              tooltip: 'Account',
+              tooltip: 'खाते',
               icon: const Icon(Icons.person_outline),
               onSelected: (v) {
                 if (v == 'logout') widget.onLogout();
@@ -117,7 +118,7 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
                     children: [
                       Icon(Icons.logout, size: 18),
                       SizedBox(width: 10),
-                      Text('Sign out'),
+                      Text('बाहेर पडा'),
                     ],
                   ),
                 ),
@@ -191,7 +192,7 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
               ],
               StatusBox(bluetoothOn: mesh.bluetoothOn, scanningOk: scanningOk),
               const SizedBox(height: 16),
-              SectionHeader(title: 'Nearby Seva'),
+              SectionHeader(title: t.nearbySeva),
               NearbySevaCard(
                 points: nearbySeva,
                 onTap: (point) => Navigator.of(context).push(
@@ -219,8 +220,8 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
                       child: ActionBox(
                         color: AppColors.sos,
                         icon: Icons.sos,
-                        title: 'Send SOS',
-                        subtitle: 'Alert nearby phones',
+                        title: t.sosSend,
+                        subtitle: 'जवळच्या फोनना कळवा',
                         onTap: widget.onOpenSos,
                       ),
                     ),
@@ -229,11 +230,11 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
                       child: ActionBox(
                         color: AppColors.lostPerson,
                         icon: Icons.person_search,
-                        title: 'Missing',
+                        title: 'हरवलेले',
                         subtitle: activeMissing == 0
-                            ? 'Report or search'
-                            : '$activeMissing active report${activeMissing == 1 ? '' : 's'}',
-                        badge: activeMissing == 0 ? null : '$activeMissing',
+                            ? 'कळवा किंवा शोधा'
+                            : '${mrNum(activeMissing)} सुरू असलेले शोध',
+                        badge: activeMissing == 0 ? null : mrNum(activeMissing),
                         onTap: widget.onOpenMissing,
                       ),
                     ),

@@ -6,6 +6,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../l10n/app_strings.dart';
 import '../mesh_service.dart';
 import '../models.dart';
 import '../theme.dart';
@@ -105,7 +106,7 @@ class _SosScreenState extends State<SosScreen>
     return Column(
       children: [
         AppBar(
-          title: const Text('Send an alert'),
+          title: const Text('मदतीसाठी सूचना पाठवा'),
           automaticallyImplyLeading: false,
         ),
         Padding(
@@ -119,7 +120,7 @@ class _SosScreenState extends State<SosScreen>
               ),
               ButtonSegment(
                 value: kCategoryLostPerson,
-                label: Text('Lost Person'),
+                label: Text('हरवलेली व्यक्ती'),
                 icon: Icon(Icons.person_search),
               ),
             ],
@@ -158,8 +159,8 @@ class _SosScreenState extends State<SosScreen>
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
             child: Column(
               children: [
-                const _SentCheckLine('Alert propagated to your Dindi'),
-                const _SentCheckLine('Alert propagated to nearby volunteers'),
+                _SentCheckLine(t.sosPropagatedDindi),
+                _SentCheckLine(t.sosPropagatedVolunteers),
                 // Seva already discovered through the mesh that matches what
                 // is wrong. Shown right here because this is the screen
                 // somebody is still looking at in the seconds after pressing
@@ -184,7 +185,10 @@ class _SosScreenState extends State<SosScreen>
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(
-              'Last sent: ${categoryLabel(_lastSent!.category)} · msg #${_lastSent!.msgId}',
+              // Diagnostic tail, kept in Arabic numerals on purpose — this
+              // line is for confirming which packet went out, not for a
+              // pilgrim mid-emergency. See the note in app_strings.dart.
+              'शेवटचे पाठवले: msg #${_lastSent!.msgId}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
@@ -252,8 +256,10 @@ class _SosScreenState extends State<SosScreen>
                           const SizedBox(height: 6),
                           Text(
                             onCooldown
-                                ? '${widget.mesh.cooldownRemaining.inSeconds + 1}s'
-                                : 'HOLD',
+                                ? mrNum(
+                                    widget.mesh.cooldownRemaining.inSeconds + 1,
+                                  )
+                                : t.sosHold,
                             style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w800,
@@ -275,22 +281,27 @@ class _SosScreenState extends State<SosScreen>
     switch (_state) {
       case _SendState.idle:
         text = mesh.onCooldown
-            ? 'Cooling down — one alert every 10s keeps the radio from getting hogged'
-            : 'Press and hold to send ${categoryLabel(_category)}';
+            ? t.sosCooldown(mesh.cooldownRemaining.inSeconds + 1)
+            : _category == kCategorySos
+            ? '${t.sosSend} — दाबून ठेवा'
+            : '${t.lostPersonAlert} — दाबून ठेवा';
         break;
       case _SendState.holding:
-        text = 'Keep holding…';
+        text = t.sosKeepHolding;
         break;
       case _SendState.sending:
-        text = 'Broadcasting over the mesh…';
+        text = t.sosSending;
         break;
       case _SendState.sent:
-        final headline = _category != kCategorySos
-            ? '${categoryLabel(_category)} sent'
+        // The msgId/TTL tail is deliberately dropped from the Marathi
+        // headline: it is diagnostic detail, and the person reading this
+        // screen has just pressed an emergency button. It remains in the
+        // activity log, which is where it belongs.
+        text = _category != kCategorySos
+            ? '${t.lostPersonAlert} पाठवली आहे'
             : sosReasonIsSpecific(_sentReason)
-            ? '${sosReasonEmoji(_sentReason)} ${sosReasonLabel(_sentReason).toUpperCase()} SOS SENT'
-            : 'SOS SENT';
-        text = '$headline · TTL ${_lastSent?.ttl} · msg #${_lastSent?.msgId}';
+            ? '${sosReasonEmoji(_sentReason)} ${t.sosReason(_sentReason)} — ${t.sosSent}'
+            : t.sosSent;
         break;
     }
     return Text(

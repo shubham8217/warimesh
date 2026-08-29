@@ -33,7 +33,9 @@ Future<bool> openWalkingDirections(double latitude, double longitude) async {
     Uri.parse('google.navigation:q=$coords&mode=w'),
     // Universal fallback: the cross-platform Maps URL. Works through a
     // browser when no maps app is installed.
-    Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$coords&travelmode=walking'),
+    Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&destination=$coords&travelmode=walking',
+    ),
     // Last resort: a plain geo: pin. No route, but it at least shows the
     // place on a map, which beats nothing.
     Uri.parse('geo:$coords?q=$coords'),

@@ -55,7 +55,11 @@ class LostPersonAvatar extends StatelessWidget {
         CircleAvatar(
           radius: radius,
           backgroundColor: color.withValues(alpha: found ? 0.25 : 0.15),
-          child: Icon(avatarIconFor(iconIndex), color: found ? color.withValues(alpha: 0.6) : color, size: radius),
+          child: Icon(
+            avatarIconFor(iconIndex),
+            color: found ? color.withValues(alpha: 0.6) : color,
+            size: radius,
+          ),
         ),
         if (found)
           Positioned(
@@ -68,7 +72,11 @@ class LostPersonAvatar extends StatelessWidget {
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.white, width: 2),
               ),
-              child: Icon(Icons.check, size: radius * 0.45, color: Colors.white),
+              child: Icon(
+                Icons.check,
+                size: radius * 0.45,
+                color: Colors.white,
+              ),
             ),
           ),
       ],
@@ -81,7 +89,12 @@ class StatusPill extends StatelessWidget {
   final Color color;
   final IconData? icon;
 
-  const StatusPill({super.key, required this.text, required this.color, this.icon});
+  const StatusPill({
+    super.key,
+    required this.text,
+    required this.color,
+    this.icon,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -98,7 +111,14 @@ class StatusPill extends StatelessWidget {
             Icon(icon, size: 14, color: color),
             const SizedBox(width: 4),
           ],
-          Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12)),
+          Text(
+            text,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+            ),
+          ),
         ],
       ),
     );
@@ -132,7 +152,8 @@ class LogTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = AppColors.forLogKind(entry.kind);
     final t = entry.time;
-    final timeStr = '${_twoDigits(t.hour)}:${_twoDigits(t.minute)}:${_twoDigits(t.second)}';
+    final timeStr =
+        '${_twoDigits(t.hour)}:${_twoDigits(t.minute)}:${_twoDigits(t.second)}';
     return ListTile(
       dense: true,
       leading: CircleAvatar(
@@ -141,7 +162,14 @@ class LogTile extends StatelessWidget {
         child: Icon(_iconFor(entry.kind), size: 16, color: color),
       ),
       title: Text(entry.text, style: const TextStyle(fontSize: 13.5)),
-      subtitle: Text(entry.kind, style: TextStyle(color: color, fontSize: 11.5, fontWeight: FontWeight.w600)),
+      subtitle: Text(
+        entry.kind,
+        style: TextStyle(
+          color: color,
+          fontSize: 11.5,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
       trailing: Text(timeStr, style: Theme.of(context).textTheme.bodySmall),
     );
   }
@@ -167,7 +195,9 @@ class SectionHeader extends StatelessWidget {
             child: Text(
               title,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
             ),
           ),
           ?trailing,

@@ -5,6 +5,7 @@
 import 'package:flutter/material.dart';
 
 import '../directions.dart';
+import '../l10n/app_strings.dart';
 import '../mesh_service.dart';
 import '../models.dart';
 import '../theme.dart';
@@ -54,7 +55,7 @@ class _HelpPointDetailScreenState extends State<HelpPointDetailScreen> {
     );
     if (opened || !context.mounted) return;
     messenger?.showSnackBar(
-      const SnackBar(content: Text('No maps app could open on this phone')),
+      const SnackBar(content: Text('या फोनवर नकाशा अ‍ॅप उघडू शकले नाही')),
     );
   }
 
@@ -70,7 +71,7 @@ class _HelpPointDetailScreenState extends State<HelpPointDetailScreen> {
     final icon = _icons[_point.helpType] ?? Icons.help_outline;
 
     return Scaffold(
-      appBar: AppBar(title: Text('${_point.label} Help')),
+      appBar: AppBar(title: Text(t.station(_point.helpType))),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(20),
@@ -93,7 +94,7 @@ class _HelpPointDetailScreenState extends State<HelpPointDetailScreen> {
                   ),
                   const SizedBox(height: 14),
                   Text(
-                    '${_point.label} assistance available',
+                    '${t.station(_point.helpType)} उपलब्ध आहे',
                     style: TextStyle(
                       fontWeight: FontWeight.w800,
                       fontSize: 20,
@@ -111,7 +112,7 @@ class _HelpPointDetailScreenState extends State<HelpPointDetailScreen> {
                       borderRadius: BorderRadius.circular(30),
                     ),
                     child: Text(
-                      helpStatusLabel(_point.status).toUpperCase(),
+                      t.helpStatus(_point.status),
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 12,
@@ -132,10 +133,10 @@ class _HelpPointDetailScreenState extends State<HelpPointDetailScreen> {
                   children: [
                     _InfoLine(
                       icon: Icons.podcasts,
-                      title: 'Shared through WariMesh',
+                      title: t.sharedThroughWariMesh,
                       detail: _point.hops == 0
-                          ? 'Heard directly from the volunteer'
-                          : 'Relayed through ${_point.hops} phone${_point.hops == 1 ? '' : 's'} to reach you',
+                          ? t.receivedDirectly
+                          : t.relayedThrough(_point.hops),
                     ),
                     const Divider(height: 24),
                     const Divider(height: 24),
@@ -143,17 +144,21 @@ class _HelpPointDetailScreenState extends State<HelpPointDetailScreen> {
                       icon: _point.distanceLabel == null
                           ? Icons.location_off_outlined
                           : Icons.near_me,
-                      title: _point.distanceLabel ?? 'Location',
-                      // Never fabricated — see HelpPointRecord.whereLabel.
-                      detail: _point.distanceLabel == null
-                          ? _point.whereLabel
-                          : 'To your ${_point.directionLabel}',
+                      title: _point.distanceMetres == null
+                          ? 'ठिकाण'
+                          : t.distance(_point.distanceMetres!),
+                      // Never fabricated — see AppStrings.whereLabel.
+                      detail: t.whereLabel(
+                        hasLocation: _point.hasLocation,
+                        distanceMetres: _point.distanceMetres,
+                        bearingDegrees: _point.bearingDegrees,
+                      ),
                     ),
                     const Divider(height: 24),
                     _InfoLine(
                       icon: Icons.schedule,
-                      title: 'Last updated',
-                      detail: _point.freshnessLabel,
+                      title: t.lastUpdated,
+                      detail: t.ageLabel(_point.receivedAt),
                     ),
                   ],
                 ),
@@ -161,8 +166,8 @@ class _HelpPointDetailScreenState extends State<HelpPointDetailScreen> {
             ),
             const SizedBox(height: 12),
             Text(
-              'A BLE broadcast is public and unencrypted — this is a location a '
-              'volunteer chose to share, not a private message.',
+              'Bluetooth प्रसारण सर्वांना दिसते. हे स्वयंसेवकाने स्वतः जाहीर '
+              'केलेले ठिकाण आहे, खासगी संदेश नाही.',
               style: Theme.of(
                 context,
               ).textTheme.bodySmall?.copyWith(color: muted),
@@ -174,7 +179,7 @@ class _HelpPointDetailScreenState extends State<HelpPointDetailScreen> {
               FilledButton.icon(
                 onPressed: () => _openDirections(context),
                 icon: const Icon(Icons.directions_walk),
-                label: const Text('Open directions'),
+                label: Text(t.openDirections),
                 style: FilledButton.styleFrom(
                   minimumSize: const Size.fromHeight(52),
                   backgroundColor: AppColors.relayed,
@@ -189,9 +194,7 @@ class _HelpPointDetailScreenState extends State<HelpPointDetailScreen> {
                   _point.acknowledged ? Icons.check : Icons.directions_walk,
                 ),
                 label: Text(
-                  _point.acknowledged
-                      ? "You're on your way"
-                      : "I'm going there",
+                  _point.acknowledged ? t.youreOnYourWay : t.imGoingThere,
                 ),
                 style: FilledButton.styleFrom(
                   minimumSize: const Size.fromHeight(52),

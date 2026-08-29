@@ -120,7 +120,9 @@ class _AuthGateState extends State<AuthGate> {
 
     final role = _pendingRole;
     if (role == null) {
-      return RoleSelectScreen(onRoleChosen: (r) => setState(() => _pendingRole = r));
+      return RoleSelectScreen(
+        onRoleChosen: (r) => setState(() => _pendingRole = r),
+      );
     }
     return LoginScreen(
       role: role,

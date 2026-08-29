@@ -11,7 +11,10 @@ import '../models.dart';
 
 /// Opens a modal bottom sheet to create or join a Dindi. Returns the chosen
 /// name, or null if the sheet was dismissed without picking one.
-Future<String?> showDindiSheet(BuildContext context, {required String currentName}) {
+Future<String?> showDindiSheet(
+  BuildContext context, {
+  required String currentName,
+}) {
   return showModalBottomSheet<String>(
     context: context,
     isScrollControlled: true,
@@ -28,7 +31,9 @@ class _DindiSheet extends StatefulWidget {
 }
 
 class _DindiSheetState extends State<_DindiSheet> {
-  late final _nameController = TextEditingController(text: widget.currentName == '—' ? '' : widget.currentName);
+  late final _nameController = TextEditingController(
+    text: widget.currentName == '—' ? '' : widget.currentName,
+  );
   bool _joiningExisting = false;
   List<String> _knownDindis = [];
 
@@ -82,11 +87,17 @@ class _DindiSheetState extends State<_DindiSheet> {
             child: Container(
               width: 40,
               height: 4,
-              decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(2)),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade400,
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
           ),
           const SizedBox(height: 16),
-          const Text('Your Dindi', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+          const Text(
+            'Your Dindi',
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+          ),
           const SizedBox(height: 4),
           const Text(
             'Everyone in the same Dindi hears each other\'s SOS as a loud alert. Outside your Dindi, it\'s still relayed but shown quietly in the log.',
@@ -95,8 +106,16 @@ class _DindiSheetState extends State<_DindiSheet> {
           const SizedBox(height: 16),
           SegmentedButton<bool>(
             segments: const [
-              ButtonSegment(value: false, label: Text('Create a Dindi'), icon: Icon(Icons.add_circle_outline)),
-              ButtonSegment(value: true, label: Text('Join a Dindi'), icon: Icon(Icons.groups_outlined)),
+              ButtonSegment(
+                value: false,
+                label: Text('Create a Dindi'),
+                icon: Icon(Icons.add_circle_outline),
+              ),
+              ButtonSegment(
+                value: true,
+                label: Text('Join a Dindi'),
+                icon: Icon(Icons.groups_outlined),
+              ),
             ],
             selected: {_joiningExisting},
             onSelectionChanged: (s) => setState(() {
@@ -110,11 +129,14 @@ class _DindiSheetState extends State<_DindiSheet> {
               spacing: 8,
               runSpacing: 8,
               children: _knownDindis
-                  .map((name) => ChoiceChip(
-                        label: Text(name),
-                        selected: _nameController.text == name,
-                        onSelected: (_) => setState(() => _nameController.text = name),
-                      ))
+                  .map(
+                    (name) => ChoiceChip(
+                      label: Text(name),
+                      selected: _nameController.text == name,
+                      onSelected: (_) =>
+                          setState(() => _nameController.text = name),
+                    ),
+                  )
                   .toList(),
             ),
             const SizedBox(height: 10),
@@ -123,11 +145,14 @@ class _DindiSheetState extends State<_DindiSheet> {
             controller: _nameController,
             autofocus: true,
             decoration: InputDecoration(
-              labelText: _joiningExisting ? 'Dindi name (or type one not listed above)' : 'Name your new Dindi',
+              labelText: _joiningExisting
+                  ? 'Dindi name (or type one not listed above)'
+                  : 'Name your new Dindi',
               prefixIcon: const Icon(Icons.badge_outlined),
             ),
             textCapitalization: TextCapitalization.words,
-            onChanged: (_) => setState(() {}), // refresh the live code preview below
+            onChanged: (_) =>
+                setState(() {}), // refresh the live code preview below
           ),
           if (_nameController.text.trim().isNotEmpty) ...[
             const SizedBox(height: 8),

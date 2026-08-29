@@ -38,16 +38,17 @@ class RoleSelectScreen extends StatelessWidget {
                 'Who\'s signing in?',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const SizedBox(height: 32),
               _RoleCard(
                 icon: Icons.directions_walk,
                 color: AppColors.lostPerson,
                 title: 'Warkari',
-                subtitle: 'Walking the Wari — send an SOS or check who\'s missing',
+                subtitle:
+                    'Walking the Wari — send an SOS or check who\'s missing',
                 onTap: () => onRoleChosen(UserRole.warkari),
               ),
               const SizedBox(height: 14),
@@ -55,7 +56,8 @@ class RoleSelectScreen extends StatelessWidget {
                 icon: Icons.support_agent,
                 color: AppColors.sos,
                 title: 'Volunteer',
-                subtitle: 'Camp staff — answer alerts, run a help point, send advisories',
+                subtitle:
+                    'Camp staff — answer alerts, run a help point, send advisories',
                 onTap: () => onRoleChosen(UserRole.volunteer),
               ),
               const Spacer(),
@@ -102,9 +104,18 @@ class _RoleCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 17,
+                      ),
+                    ),
                     const SizedBox(height: 2),
-                    Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
                   ],
                 ),
               ),
