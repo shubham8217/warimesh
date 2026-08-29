@@ -73,6 +73,48 @@ Android build is the real app. Every screen and every piece of copy in it
 matches the Flutter build. It's private to your account; open it from any
 browser, phone included.
 
+## Offline Assistant (on-device LLM) — new
+
+The volunteer shell now has a 4th tab, **Assistant**: a chat with Gemma-3n
+E2B (int4) running fully on-device via Google's MediaPipe LLM Inference API
+(`com.google.mediapipe:tasks-genai:0.10.27`). No network, no server — the
+model answers first-aid / lost-person-search / crowd-safety questions from
+the phone itself, and its system prompt is seeded with this phone's live
+mesh status + active missing-person reports.
+
+**The model file is NOT in the repo or the APK** (~3.7 GB, and the HF repo
+is gated by Google's Gemma license). Two ways to get it onto the phone:
+
+1. **In-app download (easiest)**: open the Assistant tab → "Download model
+   (3.7 GB)". Needs internet once; requires the download URL to be
+   reachable (see `kLlmModelDownloadUrl` in `lib/llm_service.dart` — a HF
+   `resolve/main` URL, which works when the Gemma license is accepted for
+   the downloading account, or when a public mirror is configured).
+2. **adb push (most reliable for filming)**:
+   ```bash
+   # Download gemma-3n-E2B-it-int4.litertlm from
+   # https://huggingface.co/google/gemma-3n-E2B-it-litert-lm (accept the
+   # Gemma license; the file is the "gemma-3n-E2B-it-int4.litertlm" entry).
+   # Push it into app-private storage. The exact path matters:
+   adb shell run-as com.example.warimesh mkdir -p files/llm
+   adb push gemma-3n-E2B-it-int4.litertlm \
+     /sdcard/Download/gemma-3n-E2B-it-int4.litertlm
+   adb shell run-as com.example.warimesh cp \
+     /sdcard/Download/gemma-3n-E2B-it-int4.litertlm files/llm/
+   ```
+   (On a debug build, `run-as` works because the app is debuggable.
+   Alternative without run-as: `adb root` on an emulator, or place the file
+   in `/data/local/tmp/llm/` and change `LlmBridge.kt`'s `modelFile()`
+   to read from there.)
+
+First load takes several seconds (model is mmap'd into RAM); later loads
+are fast. Generation streams token-by-token; on a mid-range phone expect
+several seconds per response. The emulator generally **cannot** run the
+model (MediaPipe needs a real GPU/CPU backend) — film on a physical phone.
+
+E4B also exists (better answers, ~5 GB+ and slower) — swap the file +
+`LlmBridge.kt`'s `MODEL_FILE` if you ever want it.
+
 ## Still true from before (unchanged, and still worth knowing)
 
 Whether a foreground service actually keeps BLE scan/advertise alive with

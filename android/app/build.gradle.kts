@@ -49,6 +49,11 @@ android {
 dependencies {
     // Required by compileOptions.isCoreLibraryDesugaringEnabled above.
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // On-device LLM inference (MediaPipe LLM Inference API) — runs Gemma
+    // completely offline on the phone; see LlmBridge.kt + lib/llm_service.dart.
+    // 0.10.35 required: 0.10.27 crashes loading the Gemma-3n E2B bundle
+    // ("Unknown model type: tf_lite_audio_adapter").
+    implementation("com.google.mediapipe:tasks-genai:0.10.35")
 }
 
 flutter {

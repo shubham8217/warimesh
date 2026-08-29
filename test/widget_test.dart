@@ -17,11 +17,36 @@
 // here — or a real failure on a real device — degrades gracefully instead
 // of aborting startup silently.
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:warimesh/database_service.dart';
 import 'package:warimesh/main.dart';
+
+/// Stubs the on-device LLM platform channels (warimesh/llm + events) so the
+/// volunteer shell's AssistantScreen — which constructs a LlmService — gets
+/// a "no model installed" answer instead of a MissingPluginException. The
+/// real channels only exist on an Android device; see LlmBridge.kt.
+void _stubLlmChannels(WidgetTester tester) {
+  const methodChannel = MethodChannel('warimesh/llm');
+  const eventChannel = EventChannel('warimesh/llm/events');
+  tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+    methodChannel,
+    (call) async => <String, Object?>{
+      'exists': false,
+      'path': null,
+      'sizeBytes': 0,
+    },
+  );
+  tester.binding.defaultBinaryMessenger.setMockStreamHandler(
+    eventChannel,
+    MockStreamHandler.inline(
+      onListen: (arguments, events) async {},
+      onCancel: (arguments) async {},
+    ),
+  );
+}
 
 void main() {
   setUpAll(() {
@@ -39,6 +64,7 @@ void main() {
   });
 
   testWidgets('a volunteer picks their role, signs in, and reaches the volunteer dashboard', (tester) async {
+    _stubLlmChannels(tester);
     await tester.runAsync(() async {
       await tester.pumpWidget(const WariMeshApp());
       await Future.delayed(const Duration(milliseconds: 900));
@@ -72,6 +98,7 @@ void main() {
   });
 
   testWidgets('a warkari picks their role, signs in, and reaches the warkari home screen', (tester) async {
+    _stubLlmChannels(tester);
     await tester.runAsync(() async {
       await tester.pumpWidget(const WariMeshApp());
       await Future.delayed(const Duration(milliseconds: 900));
