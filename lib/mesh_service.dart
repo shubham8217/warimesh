@@ -33,6 +33,10 @@ const Duration kPresenceExpiry = Duration(seconds: 45);
 // longer than kPresenceExpiry on purpose — see MeshService._evictStalePresence
 // for why a name outlives a presence, and why the map needs a bound at all.
 const Duration kPresenceMemory = Duration(minutes: 30);
+// How long an advisory stays promoted on the Home screen. See
+// MeshService.recentAdvisories — the message itself is never deleted, it
+// just stops being the first thing a walking pilgrim sees.
+const Duration kAdvisoryShelfLife = Duration(hours: 3);
 
 // ---------------------------------------------------------------------------
 // Airtime — why an alert stays on the air for a minute, not three seconds.
@@ -383,6 +387,29 @@ class MeshService extends ChangeNotifier {
   /// Messages that arrived while the chat screen wasn't open, so a badge can
   /// show there's something to read.
   int unreadMessages = 0;
+
+  /// Advisories from volunteers, newest first — route changes, closed water
+  /// points, weather. Only ones recent enough to still be worth acting on.
+  ///
+  /// These already arrive on every phone regardless of Dindi (see
+  /// _storeMessage) and already render inside the chat thread, but a warkari
+  /// does not live in the chat thread — they live on the Home screen. An
+  /// advisory that only exists behind a tab badge is an advisory most people
+  /// walking the Wari will never read, which defeats the point of a
+  /// volunteer broadcasting it.
+  ///
+  /// [kAdvisoryShelfLife] rather than forever: "route closed ahead" is
+  /// urgent information with a short life, and a stale one sitting at the
+  /// top of the Home screen would compete with a live one. The full history
+  /// stays in the chat thread either way — nothing is deleted here, just
+  /// no longer promoted.
+  List<MeshTextMessage> get recentAdvisories {
+    final cutoff = DateTime.now().subtract(kAdvisoryShelfLife);
+    return messages
+        .where((m) => m.isAnnouncement && m.createdAt.isAfter(cutoff))
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
 
   void markMessagesRead() {
     if (unreadMessages == 0) return;

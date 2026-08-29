@@ -373,6 +373,120 @@ class _CheckLine extends StatelessWidget {
   }
 }
 
+/// Advisories from volunteers, on the screen a pilgrim actually looks at.
+///
+/// Advisories have always reached every phone in range and always rendered
+/// inside the chat thread (see _AdvisoryCard in chat_screen.dart) — but a
+/// warkari does not live in the chat thread. The volunteer side has a whole
+/// tab for broadcasting these; the receiving side had nothing but a badge on
+/// a tab most people never open, so a route change could be sitting unread
+/// on a hundred phones. This is the other half of that feature.
+///
+/// Newest first, capped, and tapping anything opens the full thread — this
+/// is a notice board, not a second inbox.
+class AdvisoriesCard extends StatelessWidget {
+  final List<MeshTextMessage> advisories;
+  final VoidCallback onOpenAll;
+
+  const AdvisoriesCard({
+    super.key,
+    required this.advisories,
+    required this.onOpenAll,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (advisories.isEmpty) return const SizedBox.shrink();
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    // Two at most. A third advisory pushes the SOS button off the screen,
+    // and the thread is one tap away for the rest.
+    final shown = advisories.take(2).toList();
+    final more = advisories.length - shown.length;
+
+    return Material(
+      color: AppColors.warning.withValues(alpha: 0.1),
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onOpenAll,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(
+                    Icons.campaign,
+                    color: AppColors.warning,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      advisories.length == 1
+                          ? 'Advisory'
+                          : '${advisories.length} advisories',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                        color: AppColors.warning,
+                      ),
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right, color: AppColors.warning),
+                ],
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'From volunteers along the route.',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: muted),
+              ),
+              const SizedBox(height: 10),
+              for (final advisory in shown)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        advisory.body,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${advisory.displayName} · ${TimeOfDay.fromDateTime(advisory.createdAt).format(context)}',
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(color: muted),
+                      ),
+                    ],
+                  ),
+                ),
+              if (more > 0) ...[
+                const SizedBox(height: 8),
+                Text(
+                  '+$more more — tap to read',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12.5,
+                    color: AppColors.warning,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// The SOS → Seva bridge: help points worth walking to for the emergency
 /// you just reported.
 ///

@@ -178,6 +178,17 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
                 if (mesh.dindiEmergencies.isNotEmpty)
                   const SizedBox(height: 12),
               ],
+              // Above Nearby Seva and the Dindi card: an advisory is
+              // time-critical ("route closed ahead") in a way a help point
+              // listing is not, and it is the one thing on this screen
+              // somebody else decided you needed to know.
+              if (mesh.recentAdvisories.isNotEmpty) ...[
+                AdvisoriesCard(
+                  advisories: mesh.recentAdvisories,
+                  onOpenAll: widget.onOpenChat,
+                ),
+                const SizedBox(height: 12),
+              ],
               StatusBox(bluetoothOn: mesh.bluetoothOn, scanningOk: scanningOk),
               const SizedBox(height: 16),
               SectionHeader(title: 'Nearby Seva'),
