@@ -4,8 +4,12 @@
 // and can't travel over the mesh. See mesh_service.dart for the real BLE
 // path and Demo Mode (a filming aid for devices/emulators without BLE
 // peripheral support).
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'database_service.dart';
 import 'models.dart';
@@ -17,7 +21,31 @@ import 'theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  FlutterForegroundTask.initCommunicationPort();
+
+  // sqflite has no Windows/Linux implementation, so on desktop every
+  // database call would fail and nobody could even sign in. Swapping in the
+  // FFI backend (real SQLite, host-native) makes the desktop build usable
+  // for UI work. Android keeps the platform-channel implementation.
+  //
+  // Desktop is a development convenience only: the mesh itself needs BLE
+  // peripheral advertising and the assistant needs the Android-native
+  // MediaPipe bridge, neither of which exists off Android. Both degrade
+  // rather than crash — see MeshService.bootstrap's per-step guards and
+  // LlmService.refreshModelInfo's MissingPluginException handling.
+  if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
+
+  // Android-only plugin; on desktop this throws rather than no-oping, and
+  // an unhandled throw here would take down startup before runApp.
+  try {
+    FlutterForegroundTask.initCommunicationPort();
+  } catch (_) {
+    // No foreground-service support on this platform — the mesh's
+    // background relay simply won't be available.
+  }
+
   runApp(const WariMeshApp());
 }
 

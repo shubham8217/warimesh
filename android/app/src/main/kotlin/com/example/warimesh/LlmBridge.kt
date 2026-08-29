@@ -98,13 +98,44 @@ class LlmBridge(private val context: Context) :
                 return
             }
             emit(mapOf("kind" to "loading"))
-            val options = LlmInference.LlmInferenceOptions.builder()
-                .setModelPath(file.absolutePath)
-                .setMaxTokens(MAX_TOKENS)
-                .setMaxTopK(40)
-                .build()
-            llm = LlmInference.createFromOptions(context, options)
-            emit(mapOf("kind" to "loaded"))
+
+            // Backend choice is the single biggest factor in how fast this
+            // feels. MediaPipe defaults to CPU, and a 4-bit ~5B-parameter
+            // model decoded on a mid-range phone CPU runs at a few tokens a
+            // second — slow enough to read as broken. The GPU backend is
+            // several times faster, so try it first.
+            //
+            // GPU init genuinely does fail on some devices (driver quirks,
+            // insufficient GPU memory), and when it does it throws rather
+            // than degrading, so CPU stays as a fallback: slow beats not
+            // working at all. Which one we ended up on is reported to Dart
+            // so the UI can say so honestly instead of leaving someone
+            // wondering why it crawls.
+            var backendUsed = "gpu"
+            llm = try {
+                LlmInference.createFromOptions(
+                    context,
+                    LlmInference.LlmInferenceOptions.builder()
+                        .setModelPath(file.absolutePath)
+                        .setMaxTokens(MAX_TOKENS)
+                        .setMaxTopK(40)
+                        .setPreferredBackend(LlmInference.Backend.GPU)
+                        .build()
+                )
+            } catch (gpuError: Throwable) {
+                backendUsed = "cpu"
+                emit(mapOf("kind" to "backend_fallback", "reason" to (gpuError.message ?: "GPU unavailable")))
+                LlmInference.createFromOptions(
+                    context,
+                    LlmInference.LlmInferenceOptions.builder()
+                        .setModelPath(file.absolutePath)
+                        .setMaxTokens(MAX_TOKENS)
+                        .setMaxTopK(40)
+                        .setPreferredBackend(LlmInference.Backend.CPU)
+                        .build()
+                )
+            }
+            emit(mapOf("kind" to "loaded", "backend" to backendUsed))
             result.success("loaded")
         } catch (e: Exception) {
             result.error("load_failed", e.message ?: "Model load failed", null)

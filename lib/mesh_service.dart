@@ -1,16 +1,12 @@
 // WariMesh — core mesh logic, separated from UI so screens just listen.
 //
-// Two independent things live here:
-//  1. The REAL BLE path (scan + advertise + relay decision + dedup). This
-//     is unchanged behavior from the original prototype, just centralized.
-//  2. DEMO MODE — a filming aid. Most Android emulators (and some real
-//     phones) don't support BLE peripheral/advertise mode at all, so
-//     `isAdvertisingSupported` comes back false and the real path can't
-//     send anything — that's very likely why "SOS has issues" during
-//     testing. Demo Mode lets you show the full send → relay → receive →
-//     notification pipeline convincingly on ONE device. Everything it does
-//     is tagged "(simulated)" in the log so it's never presented as a real
-//     over-the-air transmission — see the honesty note in models.dart.
+// This is the real BLE path only: scan, advertise, relay decision, dedup.
+//
+// It used to also carry a "Demo Mode" that narrated invented nearby phones
+// relaying your alert, for filming on a single device. That is gone. Once
+// there are real phones to test against, simulated hops in the activity log
+// are worse than useless — they make a broken mesh look like a working one,
+// which is the single most expensive kind of bug to chase.
 import 'dart:async';
 import 'dart:math';
 
@@ -129,7 +125,6 @@ class MeshService extends ChangeNotifier {
   bool scanning = false;
   bool bluetoothOn = true; // assume on until adapter state says otherwise
   bool backgroundServiceEnabled = false;
-  bool demoMode = true; // on by default — makes single-device filming reliable
 
   DateTime? _lastSendAt;
   Timer? _cooldownTicker;
@@ -427,7 +422,7 @@ class MeshService extends ChangeNotifier {
     location.dispose();
     _lifecycle = AppLifecycleListener(
       onStateChange: (state) {
-        appendLog('App lifecycle → ${state.name}', 'Demo');
+        appendLog('App lifecycle → ${state.name}', 'System');
         if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
           // Re-assert both as we go into the background rather than waiting
           // up to 20s for the next watchdog tick — this transition is
@@ -1005,7 +1000,7 @@ class MeshService extends ChangeNotifier {
 
     appendLog(
       message.outgoing ? 'You: ${message.body}' : '${message.displayName}: ${message.body}',
-      message.isAnnouncement ? 'Demo' : 'Received',
+      message.isAnnouncement ? 'Advisory' : 'Received',
     );
     notifyListeners();
   }
@@ -1195,7 +1190,7 @@ class MeshService extends ChangeNotifier {
           : LostPersonDetailPacket(msgId: packet.msgId, name: lostName, age: lostAge ?? '');
       _broadcastAlert(packet, detail);
     } else if (!peripheralSupported) {
-      appendLog('This device cannot advertise over real BLE (peripheral unsupported) — using Demo Mode', 'Warning');
+      appendLog('This device cannot advertise over real BLE — it can receive alerts but never send them', 'Warning');
     } else if (!bluetoothOn) {
       appendLog('Bluetooth is off — turn it on to broadcast over real BLE', 'Warning');
     }
@@ -1204,10 +1199,6 @@ class MeshService extends ChangeNotifier {
       'Sent ${categoryLabel(category)} (msg #${packet.msgId}, TTL ${packet.ttl})',
       'Sent',
     );
-
-    if (demoMode) {
-      unawaited(_simulateRelayNarration(packet));
-    }
 
     return packet;
   }
@@ -1274,66 +1265,6 @@ class MeshService extends ChangeNotifier {
       notifyListeners();
       if (!onCooldown) t.cancel();
     });
-  }
-
-  /// Demo-only: narrates 1-2 nearby phones picking up and relaying the
-  /// alert. Clearly tagged "(simulated)" and never touches the real
-  /// seen_messages ledger — that table represents THIS phone's own
-  /// dedup history, not another phone's.
-  Future<void> _simulateRelayNarration(MeshPacket packet) async {
-    final hops = 1 + Random().nextInt(2); // 1-2 simulated nearby phones
-    for (var i = 0; i < hops; i++) {
-      await Future.delayed(Duration(milliseconds: 500 + Random().nextInt(700)));
-      final fakeLabel = 'DEV${Random().nextInt(900) + 100}';
-      appendLog(
-        '📡 $fakeLabel picked up your ${categoryLabel(packet.category)} and relayed it (simulated)',
-        'Demo',
-      );
-    }
-  }
-
-  /// Manually feeds a synthetic packet into the exact same
-  /// `_handleReceivedPacket` pipeline a real BLE scan result would hit:
-  /// decode → dedup → SQLite → notification → relay decision. Useful to
-  /// show a genuine incoming-alert notification on camera without needing
-  /// a second phone. Clearly tagged as simulated in the log.
-  Future<void> simulateIncomingAlert(int category) async {
-    final fakeSender = 'DEV${Random().nextInt(900) + 100}';
-    final packet = MeshPacket(
-      ttl: kDefaultTtl,
-      msgId: Random().nextInt(0xFFFFFFFF),
-      category: category,
-      senderLabel: fakeSender,
-      // Tagged as our own Dindi so the demo convincingly shows the loud,
-      // prominent notification path rather than the quiet-log tier.
-      groupTag: _myGroupTag,
-    );
-    // A simulated Lost Person alert gets simulated details too, so Demo
-    // Mode exercises the same full alert screen a real one produces
-    // instead of a stripped-down version of it.
-    if (category == kCategoryLostPerson) {
-      _lostDetails[packet.msgId] = LostPersonDetailPacket(
-        msgId: packet.msgId,
-        name: 'Aarav',
-        age: '8',
-      );
-    }
-    // Give the simulated alert a position a couple of hundred metres away
-    // so Demo Mode exercises the same distance/direction path a real alert
-    // produces, rather than a stripped-down version of it. Offsets are
-    // applied to this phone's own fix, so the demo reads as somewhere
-    // genuinely nearby; with no fix we simply skip it, exactly as a real
-    // alert from a phone without GPS would.
-    final me = location.lastKnown;
-    if (me != null) {
-      _alertLocations[packet.msgId] = LocationPacket(
-        msgId: packet.msgId,
-        latitude: me.latitude + 0.0018,
-        longitude: me.longitude + 0.0011,
-      );
-    }
-    appendLog('Simulating an incoming alert from $fakeSender (demo)', 'Demo');
-    await _handleReceivedPacket(packet);
   }
 
   Future<void> refreshSeenCount() async {

@@ -87,7 +87,16 @@ void main() {
 
     expect(find.textContaining('WariMesh'), findsWidgets);
     expect(find.text('Send SOS'), findsOneWidget);
-    expect(find.text('Report Missing'), findsOneWidget);
+    // Volunteer-only: the activity feed. Both roles now share the same home
+    // layout (see home_widgets.dart), so the distinguishing marker can't be
+    // an action tile any more — it has to be something only a volunteer is
+    // shown.
+    expect(find.text('Recent activity'), findsOneWidget);
+    expect(find.textContaining('Namaskar'), findsNothing);
+    // The Dindi card must be present for a volunteer too. It was missing
+    // from this screen entirely, which left a volunteer with no way to
+    // create or join a Dindi from their own home.
+    expect(find.text('Create or join a Dindi'), findsOneWidget);
 
     // Let MeshService.bootstrap()'s in-flight real async work (permissions,
     // DB, BLE adapter checks — all try/catch-guarded, see mesh_service.dart)
@@ -127,11 +136,12 @@ void main() {
     });
     await tester.pump();
 
-    // The warkari shell greets by first name and has no volunteer-only
-    // mesh diagnostics/report-form entry point.
+    // The warkari shell greets by first name and is deliberately not shown
+    // the volunteer's mesh diagnostics or activity feed.
     expect(find.textContaining('Namaskar, Test'), findsOneWidget);
     expect(find.text('Send SOS'), findsOneWidget);
-    expect(find.text('Report Missing'), findsNothing);
+    expect(find.text('Recent activity'), findsNothing);
+    expect(find.text('Create or join a Dindi'), findsOneWidget);
 
     await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 900)));
     await tester.pump();

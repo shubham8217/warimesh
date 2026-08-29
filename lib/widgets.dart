@@ -119,7 +119,7 @@ class LogTile extends StatelessWidget {
         return Icons.sync_alt;
       case 'Final hop':
         return Icons.flag;
-      case 'Demo':
+      case 'Advisory':
         return Icons.smart_toy_outlined;
       default:
         return Icons.warning_amber_rounded;
@@ -159,7 +159,17 @@ class SectionHeader extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          // Expanded, not bare: a Row gives an unwrapped Text unbounded
+          // width, so any title long enough to meet the trailing button
+          // overflows the screen instead of shrinking. That was the
+          // yellow-and-black overflow stripe on the volunteer dashboard.
+          Expanded(
+            child: Text(
+              title,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+          ),
           ?trailing,
         ],
       ),

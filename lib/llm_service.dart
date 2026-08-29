@@ -353,6 +353,14 @@ class LlmService extends ChangeNotifier {
   /// only context an offline model can have), then the user's question.
   Future<String> _buildPrompt(String userText) async {
     final b = StringBuffer()
+      // Gemma's chat template, and it is not optional. Gemma-3n is
+      // instruction-tuned on <start_of_turn>/<end_of_turn> turns; handed a
+      // flat blob of instructions instead, it has no signal that it should
+      // now ANSWER, so it just continues the document — which comes out as
+      // the model restating or elaborating the instructions it was given.
+      // That is the "it replies with the system prompt" bug, and no amount
+      // of rewording the instructions fixes it: the turn markers do.
+      ..writeln('<start_of_turn>user')
       ..writeln('You are the WariMesh assistant, an offline field companion on a phone at a walking pilgrimage (the Wari). You help VOLUNTEERS and WARKARIS (pilgrims) in emergencies when there is no mobile network and no healthcare worker nearby.')
       ..writeln()
       ..writeln('Your job:')
@@ -374,7 +382,6 @@ class LlmService extends ChangeNotifier {
       b.writeln('- device label: ${m.deviceLabel}');
       b.writeln('- scanning: ${m.scanning}');
       b.writeln('- bluetooth on: ${m.bluetoothOn}');
-      b.writeln('- demo mode: ${m.demoMode}');
       b.writeln('- messages seen: ${m.seenCount}');
       if (m.log.isNotEmpty) {
         b.writeln('- recent activity: ${m.log.take(5).map((e) => e.text).join(' | ')}');
@@ -398,7 +405,11 @@ class LlmService extends ChangeNotifier {
 
     b
       ..writeln()
-      ..writeln('The person asks: $userText');
+      ..writeln('The person asks: $userText')
+      // Closing the user turn and opening the model turn is what actually
+      // makes the model answer rather than carry on writing the prompt.
+      ..writeln('<end_of_turn>')
+      ..write('<start_of_turn>model\n');
     return b.toString();
   }
 
@@ -418,7 +429,12 @@ class LlmService extends ChangeNotifier {
               .replaceAll('\u200B', '')
               .replaceAll('\uFE0F', '')
               .replaceAll('\uD83E\uDD39', '');
-          text = text.replaceAllMapped(RegExp(r'(.)\1{4,}'), (m) => m.group(1)!);
+          // NOTE: a "collapse any character repeated 5+ times" filter used
+          // to run here. It was papering over the missing chat template (an
+          // untemplated model degenerates into repetition) while corrupting
+          // legitimate output: "100000" became "10", which in a first-aid
+          // answer about a dosage or a distance is genuinely dangerous.
+          // With the template fixed, the cause is gone.
           if (text.isEmpty) return;
           _pendingBuffer?.write(text);
           _thinkingText = _pendingBuffer.toString();

@@ -19,7 +19,7 @@ class AppColors {
         return relayed;
       case 'Final hop':
         return neutral;
-      case 'Demo':
+      case 'Advisory':
         return demo;
       default:
         return warning;

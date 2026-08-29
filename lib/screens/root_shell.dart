@@ -3,6 +3,7 @@
 // when the mesh changes.
 import 'package:flutter/material.dart';
 
+import '../database_service.dart';
 import '../llm_service.dart';
 import '../mesh_service.dart';
 import '../models.dart';
@@ -25,6 +26,7 @@ class RootShell extends StatefulWidget {
 class _RootShellState extends State<RootShell> {
   final MeshService mesh = MeshService();
   int _tab = 0;
+  late UserProfile _profile = widget.volunteer;
 
   // The assistant is given the live mesh so its system prompt can describe
   // what this phone actually knows. Inference is entirely on-device (see
@@ -38,6 +40,31 @@ class _RootShellState extends State<RootShell> {
     mesh.bootstrap(widget.volunteer);
     mesh.loadMessages();
     llm.init();
+  }
+
+  /// Persists a newly created or joined Dindi and updates the mesh's live
+  /// notification-tier tag. The volunteer home had no Dindi card at all
+  /// before, so this path simply didn't exist for a volunteer — they were
+  /// stuck with whatever camp ID they typed at sign-in.
+  Future<void> _setDindi(String name) async {
+    final updated = UserProfile(
+      name: _profile.name,
+      phone: _profile.phone,
+      role: _profile.role,
+      groupOrId: name,
+      meshId: _profile.meshId,
+      loggedInAt: _profile.loggedInAt,
+    );
+    try {
+      await UserDb.save(updated);
+    } catch (_) {
+      // Non-fatal — apply it for this session even if it couldn't be
+      // persisted, rather than silently ignoring the choice.
+    }
+    mesh.updateDindi(name);
+    // The chat thread is per-Dindi, so switching group must reload it.
+    await mesh.loadMessages();
+    if (mounted) setState(() => _profile = updated);
   }
 
   @override
@@ -73,14 +100,15 @@ class _RootShellState extends State<RootShell> {
         final screens = [
           HomeScreen(
             mesh: mesh,
-            volunteer: widget.volunteer,
+            volunteer: _profile,
             onLogout: widget.onLogout,
             onOpenSos: () => setState(() => _tab = 1),
             onOpenMissing: () => setState(() => _tab = 2),
+            onDindiChanged: _setDindi,
           ),
           SosScreen(mesh: mesh),
           MissingScreen(mesh: mesh),
-          ChatScreen(mesh: mesh, profile: widget.volunteer),
+          ChatScreen(mesh: mesh, profile: _profile),
           AssistantScreen(llm: llm),
         ];
         return Scaffold(
