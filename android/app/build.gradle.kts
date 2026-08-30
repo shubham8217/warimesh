@@ -43,10 +43,24 @@ android {
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
 
-            // Release builds failed outright until this was added: R8 aborts
-            // on MediaPipe's LLM classes referencing AutoValue annotations
-            // that are not on the runtime classpath. See proguard-rules.pro
-            // for why silencing them is correct rather than a workaround.
+            // Minification is deliberately OFF. R8 renamed MediaPipe's
+            // AutoValue-generated LlmInferenceOptions, and MediaPipe resolves
+            // those fields by name at runtime, so the assistant died on a
+            // real phone with "field modelPath for b1.g not found" — a
+            // failure no unit test and no startup check can catch, because it
+            // only appears when somebody opens the assistant.
+            //
+            // proguard-rules.pro has keep rules that should cover it, but
+            // every one of them is a guess about what MediaPipe reflects on,
+            // and the cost of guessing wrong is a feature that looks healthy
+            // until it is demonstrated. Shrinking buys a smaller APK; that is
+            // not worth trading for an assistant that breaks on stage.
+            //
+            // The rules are kept and kept correct so re-enabling this is a
+            // one-line change followed by testing the assistant END TO END on
+            // a device — not just checking that the app starts.
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
