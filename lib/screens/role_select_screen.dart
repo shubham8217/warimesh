@@ -55,7 +55,7 @@ class RoleSelectScreen extends StatelessWidget {
                 icon: Icons.support_agent,
                 color: AppColors.sos,
                 title: 'Volunteer',
-                subtitle: 'Camp / relay staff — mesh status, background relay, activity log',
+                subtitle: 'Camp staff — answer alerts, run a help point, send advisories',
                 onTap: () => onRoleChosen(UserRole.volunteer),
               ),
               const Spacer(),

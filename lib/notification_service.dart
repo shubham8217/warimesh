@@ -150,6 +150,37 @@ class NotificationService {
     );
   }
 
+  /// Fires on the phone that sent an alert, the moment a volunteer claims
+  /// it — "Sunita is coming to help you."
+  ///
+  /// This one is worth interrupting for even though it is not an emergency,
+  /// because of who receives it and what they are doing: somebody who
+  /// pressed SOS and is now standing in a crowd with no idea whether
+  /// anything happened. It is also, unlike the SOS itself, deliberately
+  /// dismissible — it is good news, not a summons.
+  static Future<void> showResponderComing(String who) async {
+    await _plugin.show(
+      // Its own fixed id: a second responder replaces the first rather than
+      // stacking, and this can never collide with an alert notification.
+      id: 900001,
+      title: 'Help is coming',
+      body: '$who is responding to your alert.',
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _channelId,
+          'Mesh alerts',
+          channelDescription: 'Fires when this phone receives an SOS or Lost Person alert over the mesh',
+          importance: Importance.max,
+          priority: Priority.high,
+          playSound: true,
+          enableVibration: true,
+          visibility: NotificationVisibility.public,
+          autoCancel: true,
+        ),
+      ),
+    );
+  }
+
   // Long-short-long-short — deliberately unlike a normal message buzz.
   static final Int64List _sosVibration = Int64List.fromList([0, 600, 300, 600, 300, 600]);
 }

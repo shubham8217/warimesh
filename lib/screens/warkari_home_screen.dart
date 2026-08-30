@@ -9,6 +9,8 @@ import '../database_service.dart';
 import '../mesh_service.dart';
 import '../models.dart';
 import '../theme.dart';
+import '../widgets.dart';
+import 'help_point_detail_screen.dart';
 import 'home_widgets.dart';
 
 class WarkariHomeScreen extends StatefulWidget {
@@ -56,6 +58,19 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
     final mesh = widget.mesh;
     final activeMissing = _reports.where((r) => !r.found).length;
     final scanningOk = mesh.scanning && mesh.bluetoothOn;
+    final nearbySeva = mesh.activeHelpPoints;
+
+    // The most recent alert this phone sent that hasn't been closed — or,
+    // if it has, only while it's fresh enough to still be the thing on this
+    // person's mind. An SOS from three hours ago is history, not status.
+    final myAlerts = mesh.alerts.where((a) => a.mine).toList()
+      ..sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
+    final AlertRecord? myAlert = myAlerts.isEmpty
+        ? null
+        : (myAlerts.first.isResolved &&
+                DateTime.now().difference(myAlerts.first.receivedAt).inMinutes > 30
+            ? null
+            : myAlerts.first);
 
     return CustomScrollView(
       slivers: [
@@ -103,7 +118,27 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
               // headcount and member list), then the two actions side by
               // side. No section headers: with only three tiles the labels
               // were adding a layer of hierarchy the screen doesn't need.
+              // Your own alert first when you have one in flight. Someone
+              // who has just pressed SOS is looking at this screen for one
+              // reason: to find out whether anything happened.
+              if (myAlert != null) ...[
+                MyAlertCard(
+                  alert: myAlert,
+                  nameFor: (id) => mesh.nameFor(id) ?? id,
+                ),
+                const SizedBox(height: 12),
+              ],
               StatusBox(bluetoothOn: mesh.bluetoothOn, scanningOk: scanningOk),
+              const SizedBox(height: 16),
+              SectionHeader(title: 'Nearby Seva'),
+              NearbySevaCard(
+                points: nearbySeva,
+                onTap: (point) => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => HelpPointDetailScreen(mesh: mesh, point: point),
+                  ),
+                ),
+              ),
               const SizedBox(height: 12),
               DindiCard(
                 groupOrId: widget.warkari.groupOrId,

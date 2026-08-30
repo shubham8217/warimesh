@@ -1,15 +1,28 @@
 // WariMesh — bottom-nav shell hosting the volunteer's screens. Owns the
 // single MeshService instance (and the on-device LlmService) and rebuilds
 // when the mesh changes.
+//
+// The tabs are a volunteer's job in order, and they are NOT the warkari's
+// tabs (see warkari_shell.dart). This shell used to be identical to that
+// one — Home / SOS / Missing / Chat / Assistant — which meant "volunteer"
+// amounted to a few extra diagnostics on the dashboard. A warkari generates
+// events; a volunteer absorbs them, so the second tab is a response queue
+// rather than an SOS button, and broadcasting advisories to everyone in
+// range takes the place of chatting within one Dindi.
+//
+// Sending an SOS and filing a missing-person report have not been removed —
+// they moved to the home screen's overflow menu, where a volunteer who
+// needs them can still reach them in two taps.
 import 'package:flutter/material.dart';
 
 import '../database_service.dart';
 import '../llm_service.dart';
 import '../mesh_service.dart';
 import '../models.dart';
+import 'advisory_screen.dart';
 import 'alert_overlay.dart';
+import 'alerts_screen.dart';
 import 'assistant_screen.dart';
-import 'chat_screen.dart';
 import 'home_screen.dart';
 import 'missing_screen.dart';
 import 'sos_screen.dart';
@@ -67,6 +80,34 @@ class _RootShellState extends State<RootShell> {
     if (mounted) setState(() => _profile = updated);
   }
 
+  /// Goes on or off duty at a help point, and remembers it. Persisted
+  /// because a volunteer who has been at the medical tent since dawn should
+  /// not have to re-announce it every time Android restarts the app.
+  Future<void> _setStation(int station) async {
+    final updated = _profile.copyWith(station: station);
+    try {
+      await UserDb.save(updated);
+    } catch (_) {
+      // Same reasoning as _setDindi: apply it for this session rather than
+      // silently dropping the choice because a write failed.
+    }
+    mesh.setStation(station);
+    if (mounted) setState(() => _profile = updated);
+  }
+
+  /// Pushes a screen that isn't a tab — the SOS button, which a volunteer
+  /// still has but should have to go looking for.
+  void _openFullScreen(Widget screen) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: const Text('Send an SOS')),
+          body: SafeArea(child: screen),
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     mesh.dispose();
@@ -102,13 +143,15 @@ class _RootShellState extends State<RootShell> {
             mesh: mesh,
             volunteer: _profile,
             onLogout: widget.onLogout,
-            onOpenSos: () => setState(() => _tab = 1),
+            onOpenAlerts: () => setState(() => _tab = 1),
+            onOpenSos: () => _openFullScreen(SosScreen(mesh: mesh)),
             onOpenMissing: () => setState(() => _tab = 2),
             onDindiChanged: _setDindi,
+            onStationChanged: _setStation,
           ),
-          SosScreen(mesh: mesh),
+          AlertsScreen(mesh: mesh),
           MissingScreen(mesh: mesh),
-          ChatScreen(mesh: mesh, profile: _profile),
+          AdvisoryScreen(mesh: mesh),
           AssistantScreen(llm: llm),
         ];
         return Scaffold(
@@ -117,17 +160,25 @@ class _RootShellState extends State<RootShell> {
             selectedIndex: _tab,
             onDestinationSelected: (i) => setState(() => _tab = i),
             destinations: [
-              const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
-              const NavigationDestination(icon: Icon(Icons.sos_outlined), selectedIcon: Icon(Icons.sos), label: 'SOS'),
-              const NavigationDestination(icon: Icon(Icons.person_search_outlined), selectedIcon: Icon(Icons.person_search), label: 'Missing'),
+              const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Duty'),
               NavigationDestination(
+                // The badge counts alerts nobody has claimed yet, not all
+                // open ones: a volunteer needs to know how many people are
+                // waiting on *someone*, and an alert a colleague has already
+                // taken is not one of them.
                 icon: Badge(
-                  isLabelVisible: mesh.unreadMessages > 0,
-                  label: Text('${mesh.unreadMessages}'),
-                  child: const Icon(Icons.forum_outlined),
+                  isLabelVisible: mesh.unclaimedCount > 0,
+                  label: Text('${mesh.unclaimedCount}'),
+                  child: const Icon(Icons.notifications_outlined),
                 ),
-                selectedIcon: const Icon(Icons.forum),
-                label: 'Chat',
+                selectedIcon: const Icon(Icons.notifications),
+                label: 'Alerts',
+              ),
+              const NavigationDestination(icon: Icon(Icons.person_search_outlined), selectedIcon: Icon(Icons.person_search), label: 'Missing'),
+              const NavigationDestination(
+                icon: Icon(Icons.campaign_outlined),
+                selectedIcon: Icon(Icons.campaign),
+                label: 'Advisory',
               ),
               const NavigationDestination(
                 icon: Icon(Icons.psychology_alt_outlined),

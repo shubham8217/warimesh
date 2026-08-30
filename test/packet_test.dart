@@ -126,6 +126,178 @@ void main() {
     });
   });
 
+  group('response packets — ACK and RESOLVE', () {
+    test('an ACK round-trips and fits one advertisement', () {
+      final ack = AckPacket(msgId: 3141592653, responderMeshId: 'V7K2M9');
+      final bytes = ack.encode();
+      expect(bytes.length, kAckPacketLength);
+      expect(bytes.length, lessThanOrEqualTo(24));
+
+      final decoded = AckPacket.decode(bytes)!;
+      expect(decoded.msgId, 3141592653);
+      expect(decoded.responderMeshId, 'V7K2M9');
+    });
+
+    test('a RESOLVE carries its reason and fits one advertisement', () {
+      for (final reason in [kResolveFound, kResolveHandled, kResolveFalseAlarm]) {
+        final res = ResolvePacket(msgId: 42, resolverMeshId: 'V4B2XY', reason: reason);
+        final bytes = res.encode();
+        expect(bytes.length, kResolvePacketLength);
+        expect(bytes.length, lessThanOrEqualTo(24));
+
+        final decoded = ResolvePacket.decode(bytes)!;
+        expect(decoded.msgId, 42);
+        expect(decoded.resolverMeshId, 'V4B2XY');
+        expect(decoded.reason, reason);
+      }
+    });
+
+    test('an unknown reason code degrades to "handled" rather than decoding as found', () {
+      // Direction matters here. A newer build inventing reason code 9 must
+      // never be read as "found safe" by an older phone — that would close a
+      // search on a guess.
+      final bytes = ResolvePacket(msgId: 1, resolverMeshId: 'VZZZZZ').encode();
+      bytes[11] = 9;
+      expect(ResolvePacket.decode(bytes)!.reason, kResolveHandled);
+    });
+
+    test('the response decoders reject each other and anything truncated', () {
+      final ack = AckPacket(msgId: 7, responderMeshId: 'V11111').encode();
+      final res = ResolvePacket(msgId: 7, resolverMeshId: 'V11111').encode();
+      expect(ResolvePacket.decode(ack), isNull);
+      expect(AckPacket.decode(res), isNull);
+      expect(AckPacket.decode(ack.sublist(0, kAckPacketLength - 1)), isNull);
+      expect(ResolvePacket.decode(res.sublist(0, kResolvePacketLength - 1)), isNull);
+    });
+
+    test('a blank responder id is rejected rather than attributed to nobody', () {
+      final ack = AckPacket(msgId: 7, responderMeshId: '      ').encode();
+      expect(AckPacket.decode(ack), isNull);
+    });
+  });
+
+  group('PresencePacket station byte', () {
+    test('round-trips every defined station', () {
+      for (final station in kStationTypes) {
+        final packet = PresencePacket(
+          meshId: 'V7K2M9',
+          groupTag: 'AB',
+          name: 'Sunita',
+          station: station,
+        );
+        final decoded = PresencePacket.decode(packet.encode())!;
+        expect(decoded.station, station);
+        expect(decoded.name, 'Sunita');
+        expect(decoded.isHelpPoint, station != kStationNone);
+      }
+    });
+
+    test('still fits one advertisement at 20 bytes', () {
+      final bytes = PresencePacket(
+        meshId: 'V7K2M9',
+        groupTag: 'AB',
+        name: 'Sunita',
+        station: kStationMedical,
+      ).encode();
+      expect(bytes.length, kPresencePacketLength);
+      expect(bytes.length, lessThanOrEqualTo(24));
+    });
+
+    test('a 19-byte beacon from an older build still decodes, as no help point', () {
+      // The backward-compatibility guarantee that lets the station byte ship
+      // without a flag day — see the note on kPresencePacketLength. A phone
+      // that cannot be updated must not fall off the mesh.
+      final full = PresencePacket(
+        meshId: 'W7K2M9',
+        groupTag: 'AB',
+        name: 'Aarav',
+        station: kStationWater,
+      ).encode();
+      final legacy = full.sublist(0, kPresenceBaseLength);
+
+      final decoded = PresencePacket.decode(legacy)!;
+      expect(decoded.meshId, 'W7K2M9');
+      expect(decoded.name, 'Aarav');
+      expect(decoded.station, kStationNone);
+      expect(decoded.isHelpPoint, isFalse);
+    });
+
+    test('an unknown station code from a newer build reads as no help point', () {
+      // Same direction of caution as the resolve reason: never render an
+      // undefined code as some kind of help, which would send someone
+      // walking towards a tent that isn't there.
+      final bytes = PresencePacket(meshId: 'V7K2M9', groupTag: 'AB', name: 'X').encode();
+      bytes[kPresenceBaseLength] = 99;
+      expect(PresencePacket.decode(bytes)!.station, kStationNone);
+    });
+  });
+
+  group('AlertRecord triage', () {
+    AlertRecord make(int category, {String? claimedBy, DateTime? resolvedAt, int minutesAgo = 0}) =>
+        AlertRecord(
+          msgId: category * 1000 + minutesAgo,
+          category: category,
+          senderLabel: 'W7K2M9',
+          receivedAt: DateTime.now().subtract(Duration(minutes: minutesAgo)),
+          claimedBy: claimedBy,
+          resolvedAt: resolvedAt,
+        );
+
+    test('an unclaimed SOS outranks everything else', () {
+      final sos = make(kCategorySos);
+      final lost = make(kCategoryLostPerson);
+      final claimedSos = make(kCategorySos, claimedBy: 'V1');
+      final closed = make(kCategorySos, resolvedAt: DateTime.now());
+
+      expect(sos.triageRank, lessThan(lost.triageRank));
+      expect(lost.triageRank, lessThan(claimedSos.triageRank));
+      expect(claimedSos.triageRank, lessThan(closed.triageRank));
+    });
+
+    test('the three states are mutually exclusive', () {
+      expect(make(kCategorySos).isOpen, isTrue);
+      expect(make(kCategorySos, claimedBy: 'V1').isClaimed, isTrue);
+      expect(make(kCategorySos, claimedBy: 'V1').isOpen, isFalse);
+
+      // A resolved alert is not "claimed" even when someone had claimed it —
+      // otherwise the queue would offer to respond to a closed incident.
+      final closed = make(kCategorySos, claimedBy: 'V1', resolvedAt: DateTime.now());
+      expect(closed.isResolved, isTrue);
+      expect(closed.isClaimed, isFalse);
+      expect(closed.isOpen, isFalse);
+    });
+
+    test('claimedByMe distinguishes my response from a colleague\'s', () {
+      final mine = make(kCategorySos, claimedBy: 'V7K2M9');
+      expect(mine.claimedByMe('V7K2M9'), isTrue);
+      expect(mine.claimedByMe('V4B2XY'), isFalse);
+    });
+
+    test('a lost-person summary appears only once the detail packet lands', () {
+      final alert = make(kCategoryLostPerson);
+      expect(alert.lostSummary, isNull);
+      alert.lostName = 'Aarav';
+      alert.lostAge = '8';
+      expect(alert.lostSummary, 'Aarav, age 8');
+    });
+
+    test('survives a round-trip through the database map', () {
+      final original = make(kCategoryLostPerson, claimedBy: 'V4B2XY', minutesAgo: 3)
+        ..lostName = 'Aarav'
+        ..lostAge = '8'
+        ..latitude = 17.679076
+        ..longitude = 75.323997;
+
+      final restored = AlertRecord.fromMap(original.toMap().cast<String, Object?>());
+      expect(restored.msgId, original.msgId);
+      expect(restored.category, kCategoryLostPerson);
+      expect(restored.claimedBy, 'V4B2XY');
+      expect(restored.lostName, 'Aarav');
+      expect(restored.latitude, closeTo(17.679076, 1e-9));
+      expect(restored.isClaimed, isTrue);
+    });
+  });
+
   group('text fragmentation', () {
     ({TextHeadPacket head, List<TextPartPacket> parts}) frag(String body) => fragmentText(
           msgId: 7654321,
@@ -245,6 +417,160 @@ void main() {
 
     test('a non-ASCII message degrades rather than throwing', () {
       expect(() => frag('पाणी इथे आहे').head.encode(), returnsNormally);
+    });
+  });
+
+  group('HelpPointPacket — the Wari Seva Network', () {
+    test('round-trips every defined station and fits one advertisement', () {
+      for (final station in kStationTypes.where((s) => s != kStationNone)) {
+        final packet = HelpPointPacket(
+          ttl: kDefaultTtl,
+          msgId: 3141592653,
+          helpType: station,
+          senderLabel: 'V7K2M9',
+          status: kHelpStatusOpen,
+          expiresInMinutesDiv5: 24,
+        );
+        final bytes = packet.encode();
+        expect(bytes.length, kHelpPointPacketLength);
+        expect(bytes.length, lessThanOrEqualTo(24));
+
+        final decoded = HelpPointPacket.decode(bytes)!;
+        expect(decoded.helpType, station);
+        expect(decoded.msgId, 3141592653);
+        expect(decoded.senderLabel, 'V7K2M9');
+        expect(decoded.status, kHelpStatusOpen);
+        expect(decoded.expiryDuration, const Duration(minutes: 120));
+      }
+    });
+
+    test('carries the LIMITED status', () {
+      final packet = HelpPointPacket(
+        ttl: 2, msgId: 1, helpType: kStationNightHalt, senderLabel: 'V1AAAA', status: kHelpStatusLimited,
+      );
+      expect(HelpPointPacket.decode(packet.encode())!.status, kHelpStatusLimited);
+    });
+
+    test('relaying decrements ttl and preserves identity, type and expiry', () {
+      final original = HelpPointPacket(
+        ttl: kDefaultTtl, msgId: 55, helpType: kStationWater, senderLabel: 'V4B2XY', expiresInMinutesDiv5: 10,
+      );
+      final relayed = original.relayed();
+      expect(relayed.ttl, kDefaultTtl - 1);
+      expect(relayed.msgId, 55);
+      expect(relayed.helpType, kStationWater);
+      expect(relayed.senderLabel, 'V4B2XY');
+      expect(relayed.expiresInMinutesDiv5, 10);
+    });
+
+    test('rejects kStationNone — an announcement must name a real help type', () {
+      final bytes = HelpPointPacket(ttl: 2, msgId: 1, helpType: kStationMedical, senderLabel: 'V1AAAA').encode();
+      bytes[6] = kStationNone;
+      expect(HelpPointPacket.decode(bytes), isNull);
+    });
+
+    test('an unknown help type from a newer build is rejected rather than shown as something undefined', () {
+      final bytes = HelpPointPacket(ttl: 2, msgId: 1, helpType: kStationMedical, senderLabel: 'V1AAAA').encode();
+      bytes[6] = 200;
+      expect(HelpPointPacket.decode(bytes), isNull);
+    });
+
+    test('rejects a packet of the wrong type and anything truncated', () {
+      final alert = MeshPacket(ttl: 2, msgId: 7, category: kCategorySos, senderLabel: 'W7K2M9').encode();
+      expect(HelpPointPacket.decode(alert), isNull);
+      final short = HelpPointPacket(ttl: 2, msgId: 1, helpType: kStationMedical, senderLabel: 'V1AAAA')
+          .encode()
+          .sublist(0, kHelpPointPacketLength - 1);
+      expect(HelpPointPacket.decode(short), isNull);
+    });
+  });
+
+  group('HelpPointStatusPacket — closing or updating a help point', () {
+    test('round-trips CLOSED and LIMITED and fits one advertisement', () {
+      for (final status in [kHelpStatusClosed, kHelpStatusLimited]) {
+        final packet = HelpPointStatusPacket(msgId: 42, updaterMeshId: 'V4B2XY', status: status);
+        final bytes = packet.encode();
+        expect(bytes.length, kHelpPointStatusPacketLength);
+        expect(bytes.length, lessThanOrEqualTo(24));
+
+        final decoded = HelpPointStatusPacket.decode(bytes)!;
+        expect(decoded.msgId, 42);
+        expect(decoded.updaterMeshId, 'V4B2XY');
+        expect(decoded.status, status);
+      }
+    });
+
+    test('an unknown status code degrades to CLOSED rather than OPEN', () {
+      // Same direction of caution as ResolvePacket's unknown-reason test:
+      // never let a corrupt or newer-build byte read as "still open", which
+      // would send someone walking towards a help point that said it's shut.
+      final bytes = HelpPointStatusPacket(msgId: 1, updaterMeshId: 'VZZZZZ').encode();
+      bytes[11] = 9;
+      expect(HelpPointStatusPacket.decode(bytes)!.status, kHelpStatusClosed);
+    });
+
+    test('a blank updater id is rejected rather than attributed to nobody', () {
+      final bytes = HelpPointStatusPacket(msgId: 7, updaterMeshId: '      ').encode();
+      expect(HelpPointStatusPacket.decode(bytes), isNull);
+    });
+
+    test('rejects a packet of the wrong type and anything truncated', () {
+      final ack = AckPacket(msgId: 7, responderMeshId: 'V11111').encode();
+      expect(HelpPointStatusPacket.decode(ack), isNull);
+      final short = HelpPointStatusPacket(msgId: 1, updaterMeshId: 'V1AAAA')
+          .encode()
+          .sublist(0, kHelpPointStatusPacketLength - 1);
+      expect(HelpPointStatusPacket.decode(short), isNull);
+    });
+  });
+
+  group('HelpPointRecord', () {
+    test('isActive is false once closed, even before expiry', () {
+      final point = HelpPointRecord(
+        msgId: 1,
+        helpType: kStationMedical,
+        senderLabel: 'V7K2M9',
+        receivedAt: DateTime.now(),
+        expiresAt: DateTime.now().add(const Duration(hours: 1)),
+        status: kHelpStatusClosed,
+      );
+      expect(point.isActive, isFalse);
+    });
+
+    test('isActive is false once expired, even if never explicitly closed', () {
+      final point = HelpPointRecord(
+        msgId: 1,
+        helpType: kStationMedical,
+        senderLabel: 'V7K2M9',
+        receivedAt: DateTime.now().subtract(const Duration(hours: 3)),
+        expiresAt: DateTime.now().subtract(const Duration(minutes: 1)),
+      );
+      expect(point.isExpired, isTrue);
+      expect(point.isActive, isFalse);
+    });
+
+    test('a night halt gets a longer default expiry than other stations', () {
+      expect(helpPointDefaultExpiry(kStationNightHalt), greaterThan(helpPointDefaultExpiry(kStationMedical)));
+    });
+
+    test('survives a round-trip through the database map', () {
+      final original = HelpPointRecord(
+        msgId: 12345,
+        helpType: kStationPolice,
+        senderLabel: 'V7K2M9',
+        senderName: 'Sunita',
+        receivedAt: DateTime.now(),
+        expiresAt: DateTime.now().add(const Duration(hours: 2)),
+        hops: 2,
+        status: kHelpStatusLimited,
+      )..acknowledged = true;
+
+      final restored = HelpPointRecord.fromMap(original.toMap().cast<String, Object?>());
+      expect(restored.msgId, 12345);
+      expect(restored.helpType, kStationPolice);
+      expect(restored.hops, 2);
+      expect(restored.isLimited, isTrue);
+      expect(restored.acknowledged, isTrue);
     });
   });
 }
