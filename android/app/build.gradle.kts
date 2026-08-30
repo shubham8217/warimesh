@@ -42,6 +42,15 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+
+            // Release builds failed outright until this was added: R8 aborts
+            // on MediaPipe's LLM classes referencing AutoValue annotations
+            // that are not on the runtime classpath. See proguard-rules.pro
+            // for why silencing them is correct rather than a workaround.
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }
