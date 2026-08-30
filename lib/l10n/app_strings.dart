@@ -26,12 +26,37 @@
 // natural next step; the point of doing it this way now is that no screen
 // has to change when that happens — they all read from `t`.
 
+import 'package:flutter/material.dart';
+
+import '../database_service.dart';
 import '../models.dart';
+import '../theme.dart';
 
-/// The current language. Marathi by default — see the note above.
-AppStrings t = const MarathiStrings();
+/// The language the whole app is currently rendering in.
+///
+/// A notifier rather than a plain global because changing language has to
+/// repaint every screen that is already built — main.dart listens to this
+/// and rebuilds the MaterialApp beneath it. A bare mutable global would
+/// change the strings and leave the visible UI stale until something else
+/// happened to trigger a rebuild, which is the sort of half-applied setting
+/// that makes people tap it repeatedly.
+final ValueNotifier<AppStrings> appLanguage = ValueNotifier<AppStrings>(
+  const MarathiStrings(),
+);
 
-void setAppLanguage(AppStrings strings) => t = strings;
+/// Marathi by default — see the note at the top of this file.
+AppStrings get t => appLanguage.value;
+
+void setAppLanguage(AppStrings strings) => appLanguage.value = strings;
+
+/// Persisted as a short code (see SettingsDb) rather than a class name, so
+/// the stored value stays readable and stable if these classes are ever
+/// renamed.
+const String kLanguageMarathi = 'mr';
+const String kLanguageEnglish = 'en';
+
+AppStrings appStringsForCode(String? code) =>
+    code == kLanguageEnglish ? const EnglishStrings() : const MarathiStrings();
 
 /// Devanagari numerals, for the numbers a Warkari reads.
 ///
@@ -52,6 +77,13 @@ String mrNum(Object value) {
 
 abstract class AppStrings {
   const AppStrings();
+
+  /// What gets written to storage, and what names this language in the
+  /// language picker — in its OWN language, always. Somebody who has landed
+  /// in a language they cannot read must still be able to find their way
+  /// out, and "English" written in Devanagari helps nobody do that.
+  String get languageCode;
+  String get languageName;
 
   // ---- roles and people -------------------------------------------------
   String get warkari;
@@ -184,12 +216,20 @@ abstract class AppStrings {
   String get meshNotConnected;
   String get bluetoothOff;
 
+  /// The menu entry that opens the language picker.
+  String get language;
+
   // ---- time -------------------------------------------------------------
   String ageLabel(DateTime since);
 }
 
 class MarathiStrings extends AppStrings {
   const MarathiStrings();
+
+  @override
+  String get languageCode => kLanguageMarathi;
+  @override
+  String get languageName => 'मराठी';
 
   @override
   String get warkari => 'वारकरी';
@@ -491,6 +531,9 @@ class MarathiStrings extends AppStrings {
       'Bluetooth बंद आहे — जवळच्या फोनपर्यंत पोहोचण्यासाठी चालू करा';
 
   @override
+  String get language => 'भाषा';
+
+  @override
   String ageLabel(DateTime since) {
     final mins = DateTime.now().difference(since).inMinutes;
     if (mins < 1) return 'आत्ताच';
@@ -505,6 +548,11 @@ class MarathiStrings extends AppStrings {
 /// line, not a rewrite. Nothing selects this today — see setAppLanguage.
 class EnglishStrings extends AppStrings {
   const EnglishStrings();
+
+  @override
+  String get languageCode => kLanguageEnglish;
+  @override
+  String get languageName => 'English';
 
   @override
   String get warkari => 'Warkari';
@@ -755,6 +803,9 @@ class EnglishStrings extends AppStrings {
       'Bluetooth is off — turn it on to reach nearby phones';
 
   @override
+  String get language => 'Language';
+
+  @override
   String ageLabel(DateTime since) {
     final mins = DateTime.now().difference(since).inMinutes;
     if (mins < 1) return 'just now';
@@ -762,5 +813,77 @@ class EnglishStrings extends AppStrings {
     final hours = mins ~/ 60;
     if (hours < 24) return '${hours}h ago';
     return '${hours ~/ 24}d ago';
+  }
+}
+
+/// The language picker itself.
+///
+/// Each language is named in its OWN script — "मराठी" and "English", never
+/// "Marathi" or "इंग्रजी". Somebody who has ended up in a language they
+/// cannot read has to be able to find their way out, and that only works if
+/// the option they want is written the way they would recognise it.
+Future<void> showLanguageSheet(BuildContext context) async {
+  final chosen = await showModalBottomSheet<AppStrings>(
+    context: context,
+    builder: (sheetContext) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+            child: Row(
+              children: [
+                const Icon(Icons.translate),
+                const SizedBox(width: 12),
+                Text(
+                  t.language,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 18,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          for (final option in const [MarathiStrings(), EnglishStrings()])
+            ListTile(
+              // Generous vertical space: Devanagari sits taller than Latin,
+              // and this is tapped by people with tired eyes.
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 6,
+              ),
+              leading: Icon(
+                option.languageCode == t.languageCode
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_unchecked,
+                color: option.languageCode == t.languageCode
+                    ? AppColors.relayed
+                    : null,
+              ),
+              title: Text(
+                option.languageName,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 17,
+                ),
+              ),
+              onTap: () => Navigator.of(sheetContext).pop(option),
+            ),
+          const SizedBox(height: 12),
+        ],
+      ),
+    ),
+  );
+  if (chosen == null || chosen.languageCode == t.languageCode) return;
+
+  setAppLanguage(chosen);
+  try {
+    await SettingsDb.set(SettingsDb.keyLanguage, chosen.languageCode);
+  } catch (_) {
+    // Applied for this session even if it could not be saved — the same
+    // rule the Dindi and duty pickers follow. Never silently discard a
+    // choice because a write failed.
   }
 }

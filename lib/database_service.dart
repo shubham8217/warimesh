@@ -16,7 +16,7 @@ import 'models.dart';
 
 class AppDatabase {
   static Database? _db;
-  static const int _version = 12;
+  static const int _version = 13;
 
   /// The database filename. A constant in the app; overridable only so that
   /// test files can each own their own file.
@@ -44,6 +44,7 @@ class AppDatabase {
         await _createMessages(db);
         await _createAlerts(db);
         await _createHelpPoints(db);
+        await _createAppSettings(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -132,6 +133,9 @@ class AppDatabase {
           // position is still worth knowing about.
           await _addColumnIfMissing(db, 'help_points', 'latitude', 'REAL');
           await _addColumnIfMissing(db, 'help_points', 'longitude', 'REAL');
+        }
+        if (oldVersion < 13) {
+          await _createAppSettings(db);
         }
       },
     );
@@ -237,6 +241,20 @@ class AppDatabase {
         longitude REAL
       )
     """);
+  }
+
+  /// Small key-value store for app-level preferences that belong to the
+  /// PHONE rather than to whoever is signed in on it — language being the
+  /// first. Deliberately not a column on volunteer_profile: the language
+  /// someone can read does not change when they sign out, and it has to be
+  /// readable before anyone has signed in at all.
+  static Future<void> _createAppSettings(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      )
+    ''');
   }
 
   static Future<void> _createSeenMessages(Database db) async {
@@ -604,6 +622,33 @@ class HelpPointsDb {
       limit: 200,
     );
     return rows.map(HelpPointRecord.fromMap).toList();
+  }
+}
+
+// ===================== app_settings =====================
+
+/// Phone-level preferences. See _createAppSettings for why these are not
+/// hung off the signed-in profile.
+class SettingsDb {
+  static const String keyLanguage = 'language';
+
+  static Future<String?> get(String key) async {
+    final db = await AppDatabase.instance;
+    final rows = await db.query(
+      'app_settings',
+      where: 'key = ?',
+      whereArgs: [key],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first['value'] as String?;
+  }
+
+  static Future<void> set(String key, String value) async {
+    final db = await AppDatabase.instance;
+    await db.insert('app_settings', {
+      'key': key,
+      'value': value,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 }
 

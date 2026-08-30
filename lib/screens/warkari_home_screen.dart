@@ -102,6 +102,7 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
               icon: const Icon(Icons.person_outline),
               onSelected: (v) {
                 if (v == 'logout') widget.onLogout();
+                if (v == 'language') showLanguageSheet(context);
               },
               itemBuilder: (context) => [
                 PopupMenuItem<String>(
@@ -112,6 +113,16 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
                   ),
                 ),
                 const PopupMenuDivider(),
+                PopupMenuItem<String>(
+                  value: 'language',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.translate, size: 18),
+                      const SizedBox(width: 10),
+                      Text('${t.language} · ${t.languageName}'),
+                    ],
+                  ),
+                ),
                 const PopupMenuItem<String>(
                   value: 'logout',
                   child: Row(

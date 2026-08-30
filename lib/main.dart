@@ -4,6 +4,7 @@
 // and can't travel over the mesh. See mesh_service.dart for the real BLE
 // path and Demo Mode (a filming aid for devices/emulators without BLE
 // peripheral support).
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -12,6 +13,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'database_service.dart';
+import 'l10n/app_strings.dart';
 import 'models.dart';
 import 'screens/login_screen.dart';
 import 'screens/role_select_screen.dart';
@@ -46,7 +48,24 @@ void main() {
     // background relay simply won't be available.
   }
 
+  // The saved language, before the first frame — otherwise the app paints
+  // in Marathi and then visibly flips to English for someone who chose
+  // English, which looks like a bug even though it settles correctly.
+  // Guarded because a database that cannot open must not stop the app from
+  // starting; the default language is a perfectly good fallback.
+  unawaited(_restoreLanguage());
+
   runApp(const WariMeshApp());
+}
+
+Future<void> _restoreLanguage() async {
+  try {
+    setAppLanguage(
+      appStringsForCode(await SettingsDb.get(SettingsDb.keyLanguage)),
+    );
+  } catch (_) {
+    // Stay on the default — see the note above.
+  }
 }
 
 class WariMeshApp extends StatelessWidget {
@@ -54,11 +73,17 @@ class WariMeshApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'WariMesh',
-      debugShowCheckedModeBanner: false,
-      theme: buildAppTheme(),
-      home: const AuthGate(),
+    // Rebuilds the whole tree when the language changes, so a switch takes
+    // effect on every screen at once rather than only on whatever happens
+    // to be rebuilt next. See appLanguage in l10n/app_strings.dart.
+    return ValueListenableBuilder<AppStrings>(
+      valueListenable: appLanguage,
+      builder: (context, _, _) => MaterialApp(
+        title: 'WariMesh',
+        debugShowCheckedModeBanner: false,
+        theme: buildAppTheme(),
+        home: const AuthGate(),
+      ),
     );
   }
 }

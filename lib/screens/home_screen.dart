@@ -90,6 +90,8 @@ class HomeScreen extends StatelessWidget {
                         builder: (_) => ActivityLogScreen(mesh: mesh),
                       ),
                     );
+                  case 'language':
+                    showLanguageSheet(context);
                   case 'logout':
                     onLogout();
                 }
@@ -134,6 +136,16 @@ class HomeScreen extends StatelessWidget {
                   ),
                 ),
                 const PopupMenuDivider(),
+                PopupMenuItem<String>(
+                  value: 'language',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.translate, size: 18),
+                      const SizedBox(width: 10),
+                      Text('${t.language} · ${t.languageName}'),
+                    ],
+                  ),
+                ),
                 const PopupMenuItem<String>(
                   value: 'logout',
                   child: Row(

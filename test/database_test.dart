@@ -21,6 +21,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:warimesh/database_service.dart';
+import 'package:warimesh/l10n/app_strings.dart';
 import 'package:warimesh/models.dart';
 
 void main() {
@@ -255,6 +256,50 @@ void main() {
         expect(stored.latitude, closeTo(17.679076, 1e-9));
       },
     );
+  });
+
+  group('app_settings — language choice', () {
+    test('a fresh database stores and returns the chosen language', () async {
+      expect(await SettingsDb.get(SettingsDb.keyLanguage), isNull);
+
+      await SettingsDb.set(SettingsDb.keyLanguage, kLanguageEnglish);
+      expect(await SettingsDb.get(SettingsDb.keyLanguage), kLanguageEnglish);
+
+      // Changing it replaces rather than accumulating rows.
+      await SettingsDb.set(SettingsDb.keyLanguage, kLanguageMarathi);
+      expect(await SettingsDb.get(SettingsDb.keyLanguage), kLanguageMarathi);
+    });
+
+    test('an unknown or missing code falls back to Marathi', () async {
+      // The default has to survive a corrupt value as well as a missing
+      // one — nobody should get an app with no strings at all.
+      expect(appStringsForCode(null).languageCode, kLanguageMarathi);
+      expect(appStringsForCode('zz').languageCode, kLanguageMarathi);
+      expect(
+        appStringsForCode(kLanguageEnglish).languageCode,
+        kLanguageEnglish,
+      );
+    });
+
+    test('both languages implement the whole contract', () {
+      // Guards the promise that switching is one call and not a rewrite: if
+      // either class ever falls behind, this is where it shows up rather
+      // than as a crash on a phone in a field.
+      for (final lang in const <AppStrings>[
+        MarathiStrings(),
+        EnglishStrings(),
+      ]) {
+        expect(lang.languageName, isNotEmpty);
+        expect(lang.sosSend, isNotEmpty);
+        expect(lang.dindiLead, isNotEmpty);
+        expect(lang.station(kStationMedical), isNotEmpty);
+        expect(lang.sosReason(kSosReasonMedical), isNotEmpty);
+        expect(lang.helpStatus(kHelpStatusOpen), isNotEmpty);
+        expect(lang.distance(240), isNotEmpty);
+        expect(lang.direction(45), isNotEmpty);
+        expect(lang.whereLabel(hasLocation: false), isNotEmpty);
+      }
+    });
   });
 
   group('alerts table — SOS reason and sightings', () {
