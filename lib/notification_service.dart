@@ -77,7 +77,7 @@ class NotificationService {
         : ' — $distanceLabel, to your $directionLabel';
 
     final String body;
-    if (isSos && reason != null && sosReasonIsSpecific(reason)) {
+    if (isSos && sosReasonIsSpecific(reason)) {
       // The reason is the whole point of putting it on the lock screen:
       // "Rahul needs help" tells a volunteer to go, "Rahul — Medical" tells
       // them what to bring. See kSosReason* in models.dart.

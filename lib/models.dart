@@ -514,8 +514,9 @@ class HelpPointPacket {
     // An unrecognised station code (from a newer build, or a corrupt
     // advertisement) must not render as a help point of some undefined
     // kind — see the same guard on PresencePacket.decode.
-    if (!kStationTypes.contains(helpType) || helpType == kStationNone)
+    if (!kStationTypes.contains(helpType) || helpType == kStationNone) {
       return null;
+    }
     return HelpPointPacket(
       ttl: raw[1],
       msgId: msgId,
@@ -808,8 +809,9 @@ class HelpPointRecord {
     final dir = directionLabel;
     if (d != null && dir != null) return '$d, to your $dir';
     if (d != null) return d;
-    if (hasLocation)
+    if (hasLocation) {
       return 'Position known — no fix on this phone to measure from';
+    }
     return 'Location unavailable — nearby through WariMesh';
   }
 

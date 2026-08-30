@@ -28,7 +28,6 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_strings.dart';
 import '../mesh_service.dart';
-import '../models.dart';
 import '../theme.dart';
 import '../widgets.dart';
 
@@ -372,6 +371,7 @@ class DindiDetailScreen extends StatelessWidget {
               // phone can actually hear.
               _Section(
                 title: t.dindiLeads,
+                footnote: t.visibleInWariMeshCaption,
                 children: [
                   _Line(
                     icon: Icons.person,
@@ -399,7 +399,6 @@ class DindiDetailScreen extends StatelessWidget {
                     value: t.ageLabel(dindi.lastHeard),
                   ),
                 ],
-                footnote: t.visibleInWariMeshCaption,
               ),
               const SizedBox(height: 12),
 
@@ -508,7 +507,7 @@ class _Section extends StatelessWidget {
   final List<Widget> children;
   final String? footnote;
 
-  const _Section({required this.title, required this.children, this.footnote});
+  const _Section({required this.title, this.footnote, required this.children});
 
   @override
   Widget build(BuildContext context) {

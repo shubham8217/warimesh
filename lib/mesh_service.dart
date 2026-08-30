@@ -1418,8 +1418,8 @@ class MeshService extends ChangeNotifier {
   }
 
   void _broadcastPresence() {
-    if (!peripheralSupported || !bluetoothOn)
-      return; // no real radio to send on — nothing to do
+    // No real radio to send on — nothing to do.
+    if (!peripheralSupported || !bluetoothOn) return;
     // Lowest priority: a headcount beacon may never cost an alert airtime.
     // Its airtime runs slightly past the next tick so the beacon stays in
     // the rotation continuously rather than blinking out between ticks.
@@ -2554,8 +2554,8 @@ class MeshService extends ChangeNotifier {
   }
 
   Future<void> _handleReceivedPacket(MeshPacket packet) async {
-    if (packet.senderLabel == deviceLabel)
-      return; // ignore our own advertisement bouncing back
+    // Ignore our own advertisement bouncing back.
+    if (packet.senderLabel == deviceLabel) return;
 
     final alreadySeen = await SeenMessagesDb.hasSeen(packet.msgId);
     if (alreadySeen) return; // dedup — also the loop-prevention mechanism
