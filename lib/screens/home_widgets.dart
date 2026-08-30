@@ -506,6 +506,136 @@ class AdvisoriesCard extends StatelessWidget {
   }
 }
 
+/// Tonight'''s halt, on the pilgrim'''s screen.
+///
+/// A Warkari walking all day wants to know one thing by evening: where is
+/// the mukkaam. There is no route or halt model anywhere in this app and
+/// none is invented here -- this shows night-halt Seva that a volunteer has
+/// actually announced over the mesh (kStationNightHalt), which is the only
+/// real halt signal the protocol carries.
+///
+/// Renders nothing when none has been heard. "No mukkaam announced nearby"
+/// and "there is no mukkaam" are different claims, and only the first is
+/// one this app can make -- so it stays silent rather than saying either.
+class MukkaamCard extends StatelessWidget {
+  final List<HelpPointRecord> halts;
+  final ValueChanged<HelpPointRecord> onTap;
+
+  const MukkaamCard({super.key, required this.halts, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    if (halts.isEmpty) return const SizedBox.shrink();
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.lostPerson.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.lostPerson.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.bedtime, color: AppColors.lostPerson, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  t.mukkaam,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                    color: AppColors.lostPerson,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            t.sevaDiscoveredThroughMesh,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: muted),
+          ),
+          const SizedBox(height: 10),
+          for (final halt in halts.take(3))
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => onTap(halt),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 10,
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.night_shelter_outlined,
+                          size: 20,
+                          color: AppColors.lostPerson,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                t.station(halt.helpType),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              Text(
+                                t.whereLabel(
+                                  hasLocation: halt.hasLocation,
+                                  distanceMetres: halt.distanceMetres,
+                                  bearingDegrees: halt.bearingDegrees,
+                                ),
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: halt.distanceMetres == null
+                                          ? muted
+                                          : AppColors.lostPerson,
+                                      fontWeight: halt.distanceMetres == null
+                                          ? null
+                                          : FontWeight.w700,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          t.helpStatus(halt.status),
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodySmall?.copyWith(color: muted),
+                        ),
+                        const Icon(
+                          Icons.chevron_right,
+                          size: 18,
+                          color: AppColors.lostPerson,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 /// The SOS → Seva bridge: help points worth walking to for the emergency
 /// you just reported.
 ///

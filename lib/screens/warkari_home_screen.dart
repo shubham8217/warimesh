@@ -199,6 +199,21 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
                 const SizedBox(height: 12),
               ],
               StatusBox(bluetoothOn: mesh.bluetoothOn, scanningOk: scanningOk),
+              // Tonight'''s halt, above the general Seva list: by evening it
+              // is the thing a walking Warkari most wants. Renders nothing
+              // when no halt has been announced — see MukkaamCard.
+              if (mesh.mukkaamPoints.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                MukkaamCard(
+                  halts: mesh.mukkaamPoints,
+                  onTap: (point) => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          HelpPointDetailScreen(mesh: mesh, point: point),
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               SectionHeader(title: t.nearbySeva),
               NearbySevaCard(

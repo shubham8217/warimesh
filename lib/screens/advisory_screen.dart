@@ -212,21 +212,35 @@ class _AdvisoryScreenState extends State<AdvisoryScreen> {
                 ),
               ),
               const SizedBox(height: 10),
-              GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 2,
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 10,
-                childAspectRatio: 2.1,
-                children: [
-                  for (final preset in _kPresets)
-                    _PresetTile(
-                      preset: preset,
-                      enabled: !_sending,
-                      onTap: () => _confirmAndSend(preset.body),
-                    ),
-                ],
+              // A Wrap of content-sized tiles rather than a GridView with a
+              // fixed childAspectRatio. The ratio was 2.1, which pinned every
+              // tile to one height computed from the screen width -- so on a
+              // narrower or denser phone the icon plus label did not fit and
+              // the tile overflowed (seen as "BOTTOM OVERFLOWED BY 4.3
+              // PIXELS" on a Redmi). Devanagari sits taller than Latin, which
+              // makes a fixed ratio wrong in principle here, not just on one
+              // handset: the tile must size to its text, not the other way
+              // round.
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  const spacing = 10.0;
+                  final tileWidth = (constraints.maxWidth - spacing) / 2;
+                  return Wrap(
+                    spacing: spacing,
+                    runSpacing: spacing,
+                    children: [
+                      for (final preset in _kPresets)
+                        SizedBox(
+                          width: tileWidth,
+                          child: _PresetTile(
+                            preset: preset,
+                            enabled: !_sending,
+                            onTap: () => _confirmAndSend(preset.body),
+                          ),
+                        ),
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: 20),
               Text(
@@ -318,7 +332,10 @@ class _PresetTile extends StatelessWidget {
                   fontWeight: FontWeight.w800,
                   fontSize: 14,
                 ),
-                maxLines: 1,
+                // Two lines, because a Marathi label is longer than its
+                // English counterpart and truncating the one word that says
+                // what the advisory IS makes the tile useless.
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
             ],
