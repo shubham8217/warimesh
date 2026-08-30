@@ -266,6 +266,43 @@ abstract class AppStrings {
   String notifSightingBody(String who, String subject);
   String get notifThePersonYouReported;
 
+  // ---- volunteer network overview ---------------------------------------
+  // Every label here is worded to say what the mesh can actually see. See
+  // WariNetworkStats: these are counts of what THIS phone can hear, never a
+  // census of the Wari, and the wording must not let anyone read them that
+  // way.
+  String get wariNetwork;
+  String get networkActive;
+  String get networkDown;
+  String get dindisHeading;
+  String get participants;
+  String get participantsCaption;
+  String get dindiLeads;
+  String get volunteers;
+  String get warkaris;
+  String get activeSos;
+  String get missingWarkaris;
+  String get sevaPoints;
+  String get mukkaam;
+  String get viewDindis;
+  String get noDindisHeard;
+  String get noDindisHeardDetail;
+  String get noEmergencies;
+  String get unavailable;
+  String get dindiCode;
+  String get visibleInWariMesh;
+  String get visibleInWariMeshCaption;
+  String get leadNearby;
+  String get leadLastSeen;
+  String get lastKnownLocation;
+  String get lastUpdate;
+  String get viewDindiDetails;
+  String get viewActiveIncidents;
+  String get nearbySevaShort;
+  String get mukkaamNoSource;
+  String get dindiNameUnknown;
+  String get participantsSingleHopNote;
+
   // ---- time -------------------------------------------------------------
   String ageLabel(DateTime since);
 }
@@ -670,6 +707,78 @@ class MarathiStrings extends AppStrings {
   String get notifThePersonYouReported => 'तुम्ही कळवलेली हरवलेली व्यक्ती';
 
   @override
+  String get wariNetwork => 'WariMesh नेटवर्क';
+  @override
+  String get networkActive => 'नेटवर्क सक्रिय';
+  @override
+  String get networkDown => 'नेटवर्क बंद';
+  @override
+  String get dindisHeading => 'दिंड्या';
+  @override
+  String get participants => 'WariMesh सहभागी';
+  @override
+  String get participantsCaption => 'सध्या दिसणारे WariMesh सहभागी';
+  @override
+  String get dindiLeads => 'दिंडी प्रमुख';
+  @override
+  String get volunteers => 'स्वयंसेवक';
+  @override
+  String get warkaris => 'वारकरी';
+  @override
+  String get activeSos => 'सक्रिय SOS';
+  @override
+  String get missingWarkaris => 'हरवलेले वारकरी';
+  @override
+  String get sevaPoints => 'सेवा केंद्रे';
+  @override
+  String get mukkaam => 'मुक्काम';
+  @override
+  String get viewDindis => 'दिंड्या पहा';
+  @override
+  String get noDindisHeard => 'सध्या कोणतीही दिंडी दिसत नाही';
+  @override
+  String get noDindisHeardDetail =>
+      'जवळच्या फोनवरून दिंडी दिसताच ती इथे येईल. '
+      'हा फोन ऐकत राहतो.';
+  @override
+  String get noEmergencies => 'कोणतीही सक्रिय आपत्कालीन घटना नाही';
+  @override
+  String get unavailable => 'उपलब्ध नाही';
+  @override
+  String get dindiCode => 'दिंडी कोड';
+  @override
+  String get visibleInWariMesh => 'WariMesh मध्ये सध्या दिसणारे';
+  @override
+  String get visibleInWariMeshCaption =>
+      'हा आकडा या फोनला ऐकू येणाऱ्या सहभागींचा आहे — '
+      'दिंडीतील एकूण माणसांचा नाही.';
+  @override
+  String get leadNearby => 'अलीकडे दिसले';
+  @override
+  String get leadLastSeen => 'शेवटचे दिसले';
+  @override
+  String get lastKnownLocation => 'शेवटचे ज्ञात ठिकाण';
+  @override
+  String get lastUpdate => 'शेवटचे अपडेट';
+  @override
+  String get viewDindiDetails => 'दिंडीची संपूर्ण माहिती';
+  @override
+  String get viewActiveIncidents => 'सक्रिय घटना पहा';
+  @override
+  String get nearbySevaShort => 'जवळची सेवा';
+  @override
+  String get mukkaamNoSource =>
+      'मुक्कामाची माहिती WariMesh वर येत नाही. '
+      'जवळ जाहीर केलेला मुक्काम असेल तरच दिसेल.';
+  @override
+  String get dindiNameUnknown =>
+      'दिंडीचे नाव WariMesh वर पाठवले जात नाही — फक्त कोड दिसतो.';
+  @override
+  String get participantsSingleHopNote =>
+      'हे आकडे या फोनला थेट ऐकू येणाऱ्या फोनचे आहेत, '
+      'संपूर्ण वारीचे नाहीत.';
+
+  @override
   String ageLabel(DateTime since) {
     final mins = DateTime.now().difference(since).inMinutes;
     if (mins < 1) return 'आत्ताच';
@@ -1025,6 +1134,77 @@ class EnglishStrings extends AppStrings {
       '$who reported seeing $subject.';
   @override
   String get notifThePersonYouReported => 'the person you reported missing';
+
+  @override
+  String get wariNetwork => 'WariMesh network';
+  @override
+  String get networkActive => 'Network active';
+  @override
+  String get networkDown => 'Network down';
+  @override
+  String get dindisHeading => 'Dindis';
+  @override
+  String get participants => 'WariMesh participants';
+  @override
+  String get participantsCaption => 'WariMesh participants heard right now';
+  @override
+  String get dindiLeads => 'Dindi Leads';
+  @override
+  String get volunteers => 'Volunteers';
+  @override
+  String get warkaris => 'Warkaris';
+  @override
+  String get activeSos => 'Active SOS';
+  @override
+  String get missingWarkaris => 'Missing Warkaris';
+  @override
+  String get sevaPoints => 'Seva points';
+  @override
+  String get mukkaam => 'Mukkaam';
+  @override
+  String get viewDindis => 'View Dindis';
+  @override
+  String get noDindisHeard => 'No Dindi heard right now';
+  @override
+  String get noDindisHeardDetail =>
+      'A Dindi appears here as soon as one of its phones is in range. '
+      'This phone keeps listening.';
+  @override
+  String get noEmergencies => 'No active emergencies';
+  @override
+  String get unavailable => 'Not available';
+  @override
+  String get dindiCode => 'Dindi code';
+  @override
+  String get visibleInWariMesh => 'Visible in WariMesh now';
+  @override
+  String get visibleInWariMeshCaption =>
+      'This counts participants this phone can hear — not the number of '
+      'people in the Dindi.';
+  @override
+  String get leadNearby => 'Heard recently';
+  @override
+  String get leadLastSeen => 'Last seen';
+  @override
+  String get lastKnownLocation => 'Last known location';
+  @override
+  String get lastUpdate => 'Last update';
+  @override
+  String get viewDindiDetails => 'Full Dindi details';
+  @override
+  String get viewActiveIncidents => 'View active incidents';
+  @override
+  String get nearbySevaShort => 'Nearby Seva';
+  @override
+  String get mukkaamNoSource =>
+      'Mukkaam does not travel over WariMesh. It appears only when a halt '
+      'has been announced nearby.';
+  @override
+  String get dindiNameUnknown =>
+      'Dindi names are not sent over WariMesh — only the code is visible.';
+  @override
+  String get participantsSingleHopNote =>
+      'These counts are phones this one can hear directly, not the whole Wari.';
 
   @override
   String ageLabel(DateTime since) {

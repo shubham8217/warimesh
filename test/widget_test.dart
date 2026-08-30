@@ -106,10 +106,21 @@ void main() {
       expect(find.text(t.notAtHelpPoint), findsWidgets);
       expect(find.text(t.sosSend), findsNothing);
       expect(find.textContaining('नमस्कार'), findsNothing);
+      // The Wari network overview is the top of the volunteer dashboard —
+      // Dindis heard, participants, Leads, open incidents.
+      expect(find.text(t.wariNetwork), findsOneWidget);
+      expect(find.text(t.viewDindis), findsOneWidget);
       // The Dindi card must be present for a volunteer too. It was missing
       // from this screen entirely, which left a volunteer with no way to
-      // create or join a Dindi from their own home.
-      expect(find.text('दिंडी तयार करा किंवा सामील व्हा'), findsOneWidget);
+      // create or join a Dindi from their own home. Scrolled into view
+      // because the network card above it now fills the first screenful,
+      // and a sliver list does not build children it has not reached.
+      await tester.scrollUntilVisible(
+        find.text(t.createOrJoinDindi),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.text(t.createOrJoinDindi), findsOneWidget);
 
       // Let MeshService.bootstrap()'s in-flight real async work (permissions,
       // DB, BLE adapter checks — all try/catch-guarded, see mesh_service.dart)
@@ -165,7 +176,7 @@ void main() {
       expect(find.textContaining('नमस्कार, Test'), findsOneWidget);
       expect(find.text(t.sosSend), findsOneWidget);
       expect(find.text('Recent activity'), findsNothing);
-      expect(find.text('दिंडी तयार करा किंवा सामील व्हा'), findsOneWidget);
+      expect(find.text(t.createOrJoinDindi), findsOneWidget);
 
       await tester.runAsync(
         () => Future.delayed(const Duration(milliseconds: 900)),

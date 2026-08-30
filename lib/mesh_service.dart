@@ -191,6 +191,125 @@ class HelpPoint {
   }
 }
 
+/// One Dindi as the mesh can actually see it, assembled from presence
+/// beacons plus the alert queue. Derived on read, never stored — this is a
+/// view of what is audible right now, not a record.
+///
+/// WHAT THIS CAN AND CANNOT KNOW is the whole design of this class, because
+/// a dashboard that quietly invents numbers is worse than no dashboard.
+///
+///  - IDENTITY is [tag], the 2-character hash a phone puts in every packet
+///    (see dindiTagFor). It is the dedup key: the same Dindi heard from
+///    twenty phones is one entry here. It is NOT a name — the wire format
+///    has never carried Dindi names, so [name] is filled in only when this
+///    phone happens to know it (its own Dindi, or one in KnownDindisDb).
+///    Otherwise the UI shows the code, which is honest.
+///  - MEMBERS is how many WariMesh participants of this Dindi this phone
+///    can hear. Presence is single-hop, so it is a count of phones in
+///    Bluetooth range — never the size of the Dindi. The two must never be
+///    presented as the same number.
+///  - LOCATION is usually null, and that is correct. A presence beacon
+///    deliberately carries no position (see kPresencePacketType), so the
+///    only Dindi position that exists is one attached to an alert somebody
+///    in it actually sent.
+///  - MUKKAAM has no data source anywhere in this app. There is no route
+///    model and none is invented here; the closest real signal is a
+///    night-halt Seva announcement, which belongs to the network rather
+///    than to any one Dindi.
+class DindiSummary {
+  final String tag;
+
+  /// The Dindi's real name, when this phone knows it — its own Dindi, or
+  /// one it has created/joined before (KnownDindisDb). Null for every other
+  /// Dindi on the mesh, because names do not travel.
+  final String? name;
+
+  final String? leadMeshId;
+  final String? leadName;
+  final DateTime? leadLastHeard;
+
+  /// Participants of this Dindi audible to THIS phone. See the note above.
+  final int visibleMembers;
+  final int visibleVolunteers;
+  final DateTime lastHeard;
+
+  /// Open SOS and missing-person alerts attributed to this Dindi, from the
+  /// durable alert queue rather than from presence.
+  final int activeSos;
+  final int activeMissing;
+
+  /// Where a member of this Dindi last sent a located alert from. Null for
+  /// almost every Dindi — see the note above.
+  final double? latitude;
+  final double? longitude;
+  final DateTime? locationAt;
+
+  const DindiSummary({
+    required this.tag,
+    required this.name,
+    required this.leadMeshId,
+    required this.leadName,
+    required this.leadLastHeard,
+    required this.visibleMembers,
+    required this.visibleVolunteers,
+    required this.lastHeard,
+    required this.activeSos,
+    required this.activeMissing,
+    this.latitude,
+    this.longitude,
+    this.locationAt,
+  });
+
+  bool get hasLead => leadMeshId != null;
+  bool get hasLocation => latitude != null && longitude != null;
+  bool get hasEmergency => activeSos > 0 || activeMissing > 0;
+
+  /// True when the Lead's own beacon was heard recently enough to say they
+  /// are nearby. Never called "online": nothing in this protocol knows
+  /// whether a phone is switched on, only whether it was last heard.
+  bool leadIsNearby(Duration within) {
+    final at = leadLastHeard;
+    return at != null && DateTime.now().difference(at) < within;
+  }
+}
+
+/// The volunteer's view of the whole local mesh, counted once and
+/// deduplicated by construction: participants are keyed by Mesh ID, Dindis
+/// by group tag, so the same phone or Dindi heard over several paths cannot
+/// inflate anything.
+///
+/// Every number here is "what this phone can hear", not "what exists on the
+/// Wari". Presence is single-hop and 45 seconds stale at most; the UI says
+/// so rather than implying a census.
+class WariNetworkStats {
+  final int dindis;
+  final int participants;
+  final int leads;
+  final int volunteers;
+  final int warkaris;
+  final int activeSos;
+  final int activeMissing;
+  final int sevaPoints;
+
+  /// Night-halt Seva heard nearby — the only real mukkaam signal this app
+  /// has. Belongs to the network, not to a Dindi.
+  final int mukkaamPoints;
+
+  const WariNetworkStats({
+    required this.dindis,
+    required this.participants,
+    required this.leads,
+    required this.volunteers,
+    required this.warkaris,
+    required this.activeSos,
+    required this.activeMissing,
+    required this.sevaPoints,
+    required this.mukkaamPoints,
+  });
+
+  bool get quiet => activeSos == 0 && activeMissing == 0;
+}
+
 class MeshService extends ChangeNotifier {
   final FlutterBlePeripheral _blePeripheral = FlutterBlePeripheral();
 
@@ -200,7 +319,14 @@ class MeshService extends ChangeNotifier {
   // but keeps this class from crashing if that assumption ever breaks).
   String deviceLabel = 'V${Random().nextInt(90000) + 10000}'.substring(0, 6);
   String _myGroupTag = '--';
+  String _myGroupName = '';
   String _myName = '';
+
+  // tag -> real Dindi name, for the only Dindis whose names this phone
+  // can possibly know: its own, and any it has created or joined before.
+  // Names never travel over the mesh (see DindiSummary.name), so every
+  // other Dindi is shown by its code.
+  final Map<String, String> _knownDindiNames = {};
   UserRole _myRole = UserRole.volunteer;
   int _myStation = kStationNone;
   bool _amDindiLead = false;
@@ -502,6 +628,201 @@ class MeshService extends ChangeNotifier {
       alerts.where((a) => isDindiEmergency(a, _myGroupTag)).toList()
         ..sort(_byTriage);
 
+  /// Every Dindi this phone can currently hear, busiest first.
+  ///
+  /// Deduplicated by group tag by construction. '--' is excluded: it is the
+  /// tag a phone carries when its owner has not joined a Dindi at all, so
+  /// counting it would invent a Dindi out of people who are not in one.
+  List<DindiSummary> get knownDindis {
+    final cutoff = DateTime.now().subtract(kPresenceExpiry);
+    final byTag = <String, List<MapEntry<String, _PresenceEntry>>>{};
+
+    for (final entry in _presence.entries) {
+      if (entry.value.lastHeard.isBefore(cutoff)) continue;
+      final tag = entry.value.groupTag;
+      if (tag.isEmpty || tag == '--') continue;
+      byTag.putIfAbsent(tag, () => []).add(entry);
+    }
+
+    // This phone counts itself into its own Dindi — it is a participant of
+    // the mesh like any other, and leaving it out makes a Dindi of one
+    // read as empty.
+    if (_myGroupTag != '--' && _myGroupTag.isNotEmpty) {
+      byTag.putIfAbsent(_myGroupTag, () => []);
+    }
+
+    final summaries = <DindiSummary>[];
+    byTag.forEach((tag, members) {
+      final isMine = tag == _myGroupTag;
+
+      String? leadMeshId, leadName;
+      DateTime? leadLastHeard;
+      if (isMine && _amDindiLead) {
+        leadMeshId = deviceLabel;
+        leadName = _myName.isEmpty ? deviceLabel : _myName;
+        leadLastHeard = DateTime.now();
+      } else {
+        for (final m in members) {
+          if (!m.value.isDindiLead) continue;
+          // Most recently heard Lead wins if two phones both claim it —
+          // the flag is self-declared and unauthenticated (see
+          // UserProfile.isDindiLead), so this picks one deterministically
+          // rather than pretending the conflict cannot happen.
+          if (leadLastHeard == null ||
+              m.value.lastHeard.isAfter(leadLastHeard)) {
+            leadMeshId = m.key;
+            leadName = m.value.name.isEmpty ? m.key : m.value.name;
+            leadLastHeard = m.value.lastHeard;
+          }
+        }
+      }
+
+      final volunteers = members.where((m) => m.key.startsWith('V')).length;
+      final heard = <DateTime>[
+        for (final m in members) m.value.lastHeard,
+        if (isMine) DateTime.now(),
+      ];
+
+      // Alerts are attributed to a Dindi by the group tag they were sent
+      // with, and come from the durable queue rather than from presence —
+      // so an emergency stays visible even after the phone that raised it
+      // has gone out of range.
+      final open = alerts.where((a) => a.groupTag == tag && !a.isResolved);
+      AlertRecord? located;
+      for (final a in open) {
+        if (!a.hasLocation) continue;
+        if (located == null || a.receivedAt.isAfter(located.receivedAt)) {
+          located = a;
+        }
+      }
+
+      summaries.add(
+        DindiSummary(
+          tag: tag,
+          name: _knownDindiNames[tag],
+          leadMeshId: leadMeshId,
+          leadName: leadName,
+          leadLastHeard: leadLastHeard,
+          visibleMembers: members.length + (isMine ? 1 : 0),
+          visibleVolunteers: volunteers,
+          lastHeard: heard.isEmpty
+              ? DateTime.now()
+              : heard.reduce((a, b) => a.isAfter(b) ? a : b),
+          activeSos: open.where((a) => a.isSos).length,
+          activeMissing: open.where((a) => !a.isSos).length,
+          latitude: located?.latitude,
+          longitude: located?.longitude,
+          locationAt: located?.receivedAt,
+        ),
+      );
+    });
+
+    // Emergencies first, then the Dindis we can hear best — a volunteer
+    // scanning this list needs trouble at the top.
+    summaries.sort((a, b) {
+      if (a.hasEmergency != b.hasEmergency) return a.hasEmergency ? -1 : 1;
+      final size = b.visibleMembers.compareTo(a.visibleMembers);
+      return size != 0 ? size : a.tag.compareTo(b.tag);
+    });
+    return summaries;
+  }
+
+  void _rememberDindiName(String groupOrId) {
+    final name = groupOrId.trim();
+    if (name.isEmpty || name == '—') return;
+    _knownDindiNames[dindiTagFor(name)] = name;
+  }
+
+  /// Loads the Dindi names this phone has created or joined before, so a
+  /// familiar Dindi shows its name instead of its code. Only ever this
+  /// phone's own memory — names do not travel over the mesh.
+  Future<void> loadKnownDindiNames() async {
+    try {
+      for (final name in await KnownDindisDb.all()) {
+        _rememberDindiName(name);
+      }
+      if (_myGroupName.isNotEmpty) _rememberDindiName(_myGroupName);
+      notifyListeners();
+    } catch (e) {
+      appendLog('Could not load known Dindi names: $e', 'Warning');
+    }
+  }
+
+  // Test seam. The whole value of the network overview is that its numbers
+  // do not lie, so the deduplication and counting behind them has to be
+  // verifiable without a BLE stack or a second phone. Nothing in the app
+  // calls either of these.
+  @visibleForTesting
+  void debugSetIdentity({
+    String? meshId,
+    String? groupTag,
+    UserRole? role,
+    bool? isLead,
+  }) {
+    if (meshId != null) deviceLabel = meshId;
+    if (groupTag != null) _myGroupTag = groupTag;
+    if (role != null) _myRole = role;
+    if (isLead != null) _amDindiLead = isLead;
+  }
+
+  @visibleForTesting
+  void debugIngestPresence(PresencePacket packet) => _handlePresence(packet);
+
+  DindiSummary? dindiByTag(String tag) {
+    for (final d in knownDindis) {
+      if (d.tag == tag) return d;
+    }
+    return null;
+  }
+
+  /// The volunteer dashboard's numbers. Counted from the same deduplicated
+  /// sources as [knownDindis] — see WariNetworkStats for what these can and
+  /// cannot claim.
+  WariNetworkStats get wariNetwork {
+    final cutoff = DateTime.now().subtract(kPresenceExpiry);
+    final recent = _presence.entries
+        .where((e) => e.value.lastHeard.isAfter(cutoff))
+        .toList();
+
+    var leads = 0, volunteers = 0, warkaris = 0;
+    for (final e in recent) {
+      if (e.key.startsWith('V')) {
+        volunteers++;
+      } else {
+        warkaris++;
+      }
+      if (e.value.isDindiLead) leads++;
+    }
+
+    // This phone is a participant too, and is counted exactly once.
+    if (_myRole == UserRole.volunteer) {
+      volunteers++;
+    } else {
+      warkaris++;
+    }
+    if (_amDindiLead) leads++;
+
+    final openAlerts = alerts.where((a) => !a.isResolved);
+    final seva = activeHelpPoints;
+
+    return WariNetworkStats(
+      dindis: knownDindis.length,
+      participants: recent.length + 1,
+      leads: leads,
+      volunteers: volunteers,
+      warkaris: warkaris,
+      activeSos: openAlerts.where((a) => a.isSos).length,
+      activeMissing: openAlerts.where((a) => !a.isSos).length,
+      sevaPoints: seva.length,
+      mukkaamPoints: seva.where((h) => h.helpType == kStationNightHalt).length,
+    );
+  }
+
+  /// Night-halt Seva heard nearby — see WariNetworkStats.mukkaamPoints for
+  /// why this is the only honest mukkaam signal available.
+  List<HelpPointRecord> get mukkaamPoints =>
+      activeHelpPoints.where((h) => h.helpType == kStationNightHalt).toList();
+
   Duration get cooldownRemaining {
     if (_lastSendAt == null) return Duration.zero;
     final elapsed = DateTime.now().difference(_lastSendAt!);
@@ -517,6 +838,8 @@ class MeshService extends ChangeNotifier {
   /// bootstrap() or the mesh scan/advertise loop.
   void updateDindi(String groupOrId) {
     _myGroupTag = dindiTagFor(groupOrId);
+    _myGroupName = groupOrId;
+    _rememberDindiName(groupOrId);
     notifyListeners();
   }
 
@@ -721,6 +1044,8 @@ class MeshService extends ChangeNotifier {
   Future<void> bootstrap(UserProfile profile) async {
     deviceLabel = profile.meshId;
     _myGroupTag = profile.dindiTag;
+    _myGroupName = profile.groupOrId;
+    _rememberDindiName(profile.groupOrId);
     _myRole = profile.role;
     _myStation = profile.role == UserRole.volunteer
         ? profile.station
@@ -752,6 +1077,7 @@ class MeshService extends ChangeNotifier {
       await refreshSeenCount();
       await loadAlerts();
       await loadHelpPoints();
+      await loadKnownDindiNames();
     } catch (e) {
       appendLog(
         'Local database unavailable — activity won\'t persist: $e',

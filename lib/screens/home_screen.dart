@@ -22,6 +22,7 @@ import '../mesh_service.dart';
 import '../models.dart';
 import '../theme.dart';
 import 'activity_log_screen.dart';
+import 'dindi_network_screen.dart';
 import 'home_widgets.dart';
 import 'ops_screen.dart';
 
@@ -158,6 +159,21 @@ class HomeScreen extends StatelessWidget {
           sliver: SliverList(
             delegate: SliverChildListDelegate([
               QueueSummary(mesh: mesh, onOpenAlerts: onOpenAlerts),
+              const SizedBox(height: 12),
+              // The Wari as this phone can hear it — see WariNetworkCard,
+              // which is careful about what these counts can and cannot
+              // claim.
+              WariNetworkCard(
+                mesh: mesh,
+                onOpenDindis: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => DindiNetworkScreen(
+                      mesh: mesh,
+                      onOpenAlerts: onOpenAlerts,
+                    ),
+                  ),
+                ),
+              ),
               const SizedBox(height: 12),
               DutyCard(
                 station: mesh.myStation,
