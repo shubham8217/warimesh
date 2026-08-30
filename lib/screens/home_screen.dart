@@ -69,6 +69,11 @@ class HomeScreen extends StatelessWidget {
           ),
           actions: [
             IconButton(
+              tooltip: 'भाषा / Language',
+              icon: const Icon(Icons.translate),
+              onPressed: () => showLanguageSheet(context),
+            ),
+            IconButton(
               tooltip: 'Relay status',
               icon: const Icon(Icons.hub_outlined),
               onPressed: () => Navigator.of(
@@ -90,8 +95,6 @@ class HomeScreen extends StatelessWidget {
                         builder: (_) => ActivityLogScreen(mesh: mesh),
                       ),
                     );
-                  case 'language':
-                    showLanguageSheet(context);
                   case 'logout':
                     onLogout();
                 }
@@ -136,16 +139,6 @@ class HomeScreen extends StatelessWidget {
                   ),
                 ),
                 const PopupMenuDivider(),
-                PopupMenuItem<String>(
-                  value: 'language',
-                  child: Row(
-                    children: [
-                      const Icon(Icons.translate, size: 18),
-                      const SizedBox(width: 10),
-                      Text('${t.language} · ${t.languageName}'),
-                    ],
-                  ),
-                ),
                 const PopupMenuItem<String>(
                   value: 'logout',
                   child: Row(
@@ -313,7 +306,7 @@ class DutyCard extends StatelessWidget {
       context: context,
       builder: (dialogContext) => AlertDialog(
         icon: Icon(_icons[newStation], color: AppColors.relayed, size: 32),
-        title: Text('${t.station(newStation)} जाहीर करायची?'),
+        title: Text(t.announceQuestion(t.station(newStation))),
         // Says plainly, at the moment of choosing, that the position goes
         // out — this is the one place a volunteer decides to publish
         // where they are standing.

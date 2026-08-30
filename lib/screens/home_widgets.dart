@@ -274,8 +274,7 @@ class MyAlertCard extends StatelessWidget {
     final String detail;
     if (alert.isResolved) {
       headline = t.statusClosed;
-      detail =
-          'तुमची ${t.ageLabel(alert.receivedAt)} पाठवलेली सूचना पूर्ण झाली आहे.';
+      detail = t.alertFinished(t.ageLabel(alert.receivedAt));
     } else if (alert.isClaimed) {
       headline = t.helpIsComing;
       final role = roleFor?.call(alert.claimedBy!);
@@ -283,13 +282,11 @@ class MyAlertCard extends StatelessWidget {
           ? nameFor(alert.claimedBy!)
           : '${nameFor(alert.claimedBy!)} · $role';
       detail = role == null
-          ? '$who तुमच्या सूचनेला प्रतिसाद देत आहे.'
+          ? t.respondingToYours(who)
           : '$who · $role ${t.responderVerbFor(role)}.';
     } else {
       headline = t.yourAlertIsOut;
-      detail =
-          '${t.ageLabel(alert.receivedAt)} पाठवली. जवळचे फोन ती पुढे पोहोचवत आहेत. '
-          'कोणी प्रतिसाद देताच तुम्हाला कळवले जाईल.';
+      detail = t.alertOutDetail(t.ageLabel(alert.receivedAt));
     }
 
     return Container(
@@ -564,7 +561,7 @@ class RelevantSevaCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   shown.length == 1
-                      ? '${t.station(shown.first.helpType)} जवळ आहे'
+                      ? t.stationNearby(t.station(shown.first.helpType))
                       : t.nearbySeva,
                   style: const TextStyle(
                     fontWeight: FontWeight.w800,
@@ -813,9 +810,9 @@ class DindiEmergencyCard extends StatelessWidget {
             _Field(label: t.lookingFor, value: alert.lostSummary!),
           _Field(label: t.member, value: who),
           _Field(label: t.dindi, value: dindiName),
-          _Field(label: 'ठिकाण', value: _locationText()),
+          _Field(label: t.place, value: _locationText()),
           _Field(
-            label: 'वेळ',
+            label: t.time,
             value: TimeOfDay.fromDateTime(alert.receivedAt).format(context),
           ),
           if (alert.isSpotted) SpottedLine(alert: alert, mesh: mesh),
@@ -1154,7 +1151,7 @@ class DindiCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 6),
-              MemberTile(name: 'तुम्ही', isYou: true),
+              MemberTile(name: t.you, isYou: true),
               ...memberNames.map((name) => MemberTile(name: name)),
               if (memberNames.isEmpty)
                 Padding(
@@ -1192,7 +1189,7 @@ class DindiCard extends StatelessWidget {
               const SizedBox(height: 8),
               OutlinedButton.icon(
                 icon: const Icon(Icons.swap_horiz),
-                label: const Text('दुसऱ्या दिंडीत सामील व्हा'),
+                label: Text(t.joinDifferentDindi),
                 onPressed: () async {
                   Navigator.of(sheetContext).pop();
                   final name = await showDindiSheet(
@@ -1206,7 +1203,7 @@ class DindiCard extends StatelessWidget {
               TextButton.icon(
                 style: TextButton.styleFrom(foregroundColor: AppColors.sos),
                 icon: const Icon(Icons.logout, size: 18),
-                label: const Text('दिंडी सोडा'),
+                label: Text(t.leaveDindi),
                 onPressed: () {
                   Navigator.of(sheetContext).pop();
                   onDindiChanged('—');
@@ -1251,7 +1248,7 @@ class DindiCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _hasDindi ? groupOrId : 'दिंडी तयार करा किंवा सामील व्हा',
+                      _hasDindi ? groupOrId : t.createOrJoinDindi,
                       style: TextStyle(
                         color: color,
                         fontWeight: FontWeight.w800,

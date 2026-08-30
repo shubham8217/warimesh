@@ -54,9 +54,7 @@ class _HelpPointDetailScreenState extends State<HelpPointDetailScreen> {
       _point.longitude!,
     );
     if (opened || !context.mounted) return;
-    messenger?.showSnackBar(
-      const SnackBar(content: Text('या फोनवर नकाशा अ‍ॅप उघडू शकले नाही')),
-    );
+    messenger?.showSnackBar(SnackBar(content: Text(t.noMapsApp)));
   }
 
   Future<void> _iAmGoing() async {
@@ -94,7 +92,7 @@ class _HelpPointDetailScreenState extends State<HelpPointDetailScreen> {
                   ),
                   const SizedBox(height: 14),
                   Text(
-                    '${t.station(_point.helpType)} उपलब्ध आहे',
+                    t.stationAvailable(t.station(_point.helpType)),
                     style: TextStyle(
                       fontWeight: FontWeight.w800,
                       fontSize: 20,
@@ -145,7 +143,7 @@ class _HelpPointDetailScreenState extends State<HelpPointDetailScreen> {
                           ? Icons.location_off_outlined
                           : Icons.near_me,
                       title: _point.distanceMetres == null
-                          ? 'ठिकाण'
+                          ? t.place
                           : t.distance(_point.distanceMetres!),
                       // Never fabricated — see AppStrings.whereLabel.
                       detail: t.whereLabel(
@@ -166,8 +164,7 @@ class _HelpPointDetailScreenState extends State<HelpPointDetailScreen> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Bluetooth प्रसारण सर्वांना दिसते. हे स्वयंसेवकाने स्वतः जाहीर '
-              'केलेले ठिकाण आहे, खासगी संदेश नाही.',
+              t.helpPointPrivacyNote,
               style: Theme.of(
                 context,
               ).textTheme.bodySmall?.copyWith(color: muted),

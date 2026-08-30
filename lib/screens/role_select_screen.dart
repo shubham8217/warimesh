@@ -3,6 +3,7 @@
 // see main.dart's AuthGate for how the choice made here is routed.
 import 'package:flutter/material.dart';
 
+import '../l10n/app_strings.dart';
 import '../models.dart';
 import '../theme.dart';
 
@@ -61,6 +62,9 @@ class RoleSelectScreen extends StatelessWidget {
                 onTap: () => onRoleChosen(UserRole.volunteer),
               ),
               const Spacer(),
+              // Before sign-in, and visible without opening anything. See
+              // LanguageToggle for why this cannot live behind a menu.
+              const LanguageToggle(),
             ],
           ),
         ),

@@ -219,6 +219,53 @@ abstract class AppStrings {
   /// The menu entry that opens the language picker.
   String get language;
 
+  // ---- the rest of the user-facing surface -----------------------------
+  // Everything below was briefly hardcoded straight into widgets while this
+  // layer was being built, which meant those strings ignored the language
+  // switch entirely -- the app sat in English with Marathi fragments
+  // stranded across it. Kept here so there is exactly one place where a
+  // language can be complete, or visibly incomplete.
+  String get greeting;
+  String get account;
+  String get signOut;
+  String get sendAlertTitle;
+  String get holdSuffix;
+  String get lastSent;
+  String get alertNowSent;
+  String openCount(int n);
+  String get sosSubtitle;
+  String get missingTitle;
+  String get missingSubtitleIdle;
+  String missingSubtitleActive(int n);
+  String get you;
+  String get joinDifferentDindi;
+  String get leaveDindi;
+  String get createOrJoinDindi;
+  String get place;
+  String get time;
+  String announceQuestion(String stationName);
+  String stationAvailable(String stationName);
+  String stationNearby(String stationName);
+  String get noMapsApp;
+  String get helpPointPrivacyNote;
+  String alertFinished(String age);
+  String respondingToYours(String who);
+  String alertOutDetail(String age);
+
+  // Notifications: lock-screen text is user-facing too.
+  String notifNeedsHelp(String from, String where);
+  String notifLookFor(String name, String age, String from, String where);
+  String notifSomeoneMissing(String from, String where);
+  String get notifAgePrefix;
+  String get notifMissingTitle;
+  String get notifSosTitle;
+  String notifAdvisoryTitle(String who);
+  String get notifHelpComingTitle;
+  String notifHelpComingBody(String who);
+  String get notifSightingTitle;
+  String notifSightingBody(String who, String subject);
+  String get notifThePersonYouReported;
+
   // ---- time -------------------------------------------------------------
   String ageLabel(DateTime since);
 }
@@ -534,6 +581,95 @@ class MarathiStrings extends AppStrings {
   String get language => 'भाषा';
 
   @override
+  String get greeting => 'नमस्कार';
+  @override
+  String get account => 'खाते';
+  @override
+  String get signOut => 'बाहेर पडा';
+  @override
+  String get sendAlertTitle => 'मदतीसाठी सूचना पाठवा';
+  @override
+  String get holdSuffix => 'दाबून ठेवा';
+  @override
+  String get lastSent => 'शेवटचे पाठवले';
+  @override
+  String get alertNowSent => 'पाठवली आहे';
+  @override
+  String openCount(int n) => '${mrNum(n)} प्रलंबित';
+  @override
+  String get sosSubtitle => 'जवळच्या फोनना कळवा';
+  @override
+  String get missingTitle => 'हरवलेले';
+  @override
+  String get missingSubtitleIdle => 'कळवा किंवा शोधा';
+  @override
+  String missingSubtitleActive(int n) => '${mrNum(n)} सुरू असलेले शोध';
+  @override
+  String get you => 'तुम्ही';
+  @override
+  String get joinDifferentDindi => 'दुसर्या दिंडीत सामील व्हा';
+  @override
+  String get leaveDindi => 'दिंडी सोडा';
+  @override
+  String get createOrJoinDindi => 'दिंडी तयार करा किंवा सामील व्हा';
+  @override
+  String get place => 'ठिकाण';
+  @override
+  String get time => 'वेळ';
+  @override
+  String announceQuestion(String stationName) => '$stationName जाहीर करायची?';
+  @override
+  String stationAvailable(String stationName) => '$stationName उपलब्ध आहे';
+  @override
+  String stationNearby(String stationName) => '$stationName जवळ आहे';
+  @override
+  String get noMapsApp => 'या फोनवर नकाशा अ‍ॅप उघडू शकले नाही';
+  @override
+  String get helpPointPrivacyNote =>
+      'Bluetooth प्रसारण सर्वांना दिसते. '
+      'हे स्वयंसेवकाने स्वतः जाहीर केलेले '
+      'ठिकाण आहे, खासगी संदेश नाही.';
+  @override
+  String alertFinished(String age) =>
+      'तुमची $age पाठवलेली सूचना पूर्ण झाली आहे.';
+  @override
+  String respondingToYours(String who) =>
+      '$who तुमच्या सूचनेला प्रतिसाद देत आहे.';
+  @override
+  String alertOutDetail(String age) =>
+      '$age पाठवली. जवळचे फोन ती पुढे पोहोचवत आहेत. '
+      'कोणी प्रतिसाद देताच तुम्हाला कळवले जाईल.';
+
+  @override
+  String notifNeedsHelp(String from, String where) =>
+      '$from यांना मदत हवी आहे$where';
+  @override
+  String notifLookFor(String name, String age, String from, String where) =>
+      '$name$age यांना शोधा — $from यांनी कळवले$where';
+  @override
+  String notifSomeoneMissing(String from, String where) =>
+      '$from यांनी जवळपास कोणीतरी हरवल्याचे कळवले$where';
+  @override
+  String get notifAgePrefix => 'वय';
+  @override
+  String get notifMissingTitle => '🔎 जवळपास कोणीतरी हरवले आहे';
+  @override
+  String get notifSosTitle => '🆘 SOS आला आहे';
+  @override
+  String notifAdvisoryTitle(String who) => '📢 सूचना — $who';
+  @override
+  String get notifHelpComingTitle => 'मदत येत आहे';
+  @override
+  String notifHelpComingBody(String who) => '$who मदतीसाठी येत आहेत.';
+  @override
+  String get notifSightingTitle => '👀 वारकरी दिसला';
+  @override
+  String notifSightingBody(String who, String subject) =>
+      '$who यांना $subject दिसले.';
+  @override
+  String get notifThePersonYouReported => 'तुम्ही कळवलेली हरवलेली व्यक्ती';
+
+  @override
   String ageLabel(DateTime since) {
     final mins = DateTime.now().difference(since).inMinutes;
     if (mins < 1) return 'आत्ताच';
@@ -806,6 +942,91 @@ class EnglishStrings extends AppStrings {
   String get language => 'Language';
 
   @override
+  String get greeting => 'Namaskar';
+  @override
+  String get account => 'Account';
+  @override
+  String get signOut => 'Sign out';
+  @override
+  String get sendAlertTitle => 'Send an alert';
+  @override
+  String get holdSuffix => 'press and hold';
+  @override
+  String get lastSent => 'Last sent';
+  @override
+  String get alertNowSent => 'sent';
+  @override
+  String openCount(int n) => '$n open';
+  @override
+  String get sosSubtitle => 'Alert nearby phones';
+  @override
+  String get missingTitle => 'Missing';
+  @override
+  String get missingSubtitleIdle => 'Report or search';
+  @override
+  String missingSubtitleActive(int n) => '$n active report${n == 1 ? '' : 's'}';
+  @override
+  String get you => 'You';
+  @override
+  String get joinDifferentDindi => 'Join a different Dindi';
+  @override
+  String get leaveDindi => 'Leave Dindi';
+  @override
+  String get createOrJoinDindi => 'Create or join a Dindi';
+  @override
+  String get place => 'Location';
+  @override
+  String get time => 'Time';
+  @override
+  String announceQuestion(String stationName) => 'Announce $stationName?';
+  @override
+  String stationAvailable(String stationName) => '$stationName available';
+  @override
+  String stationNearby(String stationName) => '$stationName nearby';
+  @override
+  String get noMapsApp => 'No maps app could open on this phone';
+  @override
+  String get helpPointPrivacyNote =>
+      'A Bluetooth broadcast is public and unencrypted - this is a location a '
+      'volunteer chose to share, not a private message.';
+  @override
+  String alertFinished(String age) => 'Your alert from $age is finished.';
+  @override
+  String respondingToYours(String who) => '$who is responding to your alert.';
+  @override
+  String alertOutDetail(String age) =>
+      'Sent $age. Nearby phones are passing it on. You will be told the '
+      'moment someone responds.';
+
+  @override
+  String notifNeedsHelp(String from, String where) => '$from needs help$where';
+  @override
+  String notifLookFor(String name, String age, String from, String where) =>
+      'Look for $name$age - reported by $from$where';
+  @override
+  String notifSomeoneMissing(String from, String where) =>
+      '$from reported someone missing nearby$where';
+  @override
+  String get notifAgePrefix => 'age';
+  @override
+  String get notifMissingTitle => '🔎 Missing person nearby';
+  @override
+  String get notifSosTitle => '🆘 SOS RECEIVED';
+  @override
+  String notifAdvisoryTitle(String who) => '📢 Advisory from $who';
+  @override
+  String get notifHelpComingTitle => 'Help is coming';
+  @override
+  String notifHelpComingBody(String who) => '$who is responding to your alert.';
+  @override
+  String get notifSightingTitle => '👀 Sighting reported';
+  @override
+  String notifSightingBody(String who, String subject) =>
+      '$who reported seeing $subject.';
+  @override
+  String get notifThePersonYouReported => 'the person you reported missing';
+
+  @override
   String ageLabel(DateTime since) {
     final mins = DateTime.now().difference(since).inMinutes;
     if (mins < 1) return 'just now';
@@ -876,14 +1097,89 @@ Future<void> showLanguageSheet(BuildContext context) async {
       ),
     ),
   );
-  if (chosen == null || chosen.languageCode == t.languageCode) return;
+  if (chosen == null) return;
+  await selectLanguage(chosen);
+}
 
+/// An always-visible language toggle: both languages side by side, each in
+/// its own script, no menu to open first.
+///
+/// This exists because the first version put the language control behind an
+/// overflow menu on the Home tab, which is precisely the navigation a
+/// language barrier prevents. Somebody who opens the app and cannot read it
+/// has to be able to fix that from the very first screen, without guessing
+/// which unlabelled icon hides the setting. So this sits on the role-select
+/// screen — before anyone signs in — and as a single tap in the app bar
+/// afterwards.
+class LanguageToggle extends StatelessWidget {
+  /// Compact drops the "भाषा / Language" caption for use inside an app bar
+  /// or a tight row.
+  final bool compact;
+
+  const LanguageToggle({super.key, this.compact = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<AppStrings>(
+      valueListenable: appLanguage,
+      builder: (context, current, _) {
+        final chips = Wrap(
+          spacing: 8,
+          alignment: WrapAlignment.center,
+          children: [
+            for (final option in const <AppStrings>[
+              MarathiStrings(),
+              EnglishStrings(),
+            ])
+              ChoiceChip(
+                // Deliberately large: this is tapped by elderly people, and
+                // Devanagari needs more vertical room than Latin.
+                labelPadding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                label: Text(
+                  option.languageName,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
+                selected: option.languageCode == current.languageCode,
+                onSelected: (_) => selectLanguage(option),
+              ),
+          ],
+        );
+        if (compact) return chips;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              // Both scripts in the caption too, so it is recognisable
+              // whichever language the app happens to be showing.
+              'भाषा / Language',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 8),
+            chips,
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Applies and remembers a language choice. Shared by [LanguageToggle] and
+/// [showLanguageSheet] so both paths behave identically.
+Future<void> selectLanguage(AppStrings chosen) async {
+  if (chosen.languageCode == t.languageCode) return;
   setAppLanguage(chosen);
   try {
     await SettingsDb.set(SettingsDb.keyLanguage, chosen.languageCode);
   } catch (_) {
     // Applied for this session even if it could not be saved — the same
-    // rule the Dindi and duty pickers follow. Never silently discard a
-    // choice because a write failed.
+    // rule the Dindi and duty pickers follow.
   }
 }

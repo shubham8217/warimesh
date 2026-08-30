@@ -83,12 +83,14 @@ class NotificationService {
       // them what to bring. See kSosReason* in models.dart.
       body = '$from — ${t.sosReason(reason)}$where';
     } else if (isSos) {
-      body = '$from यांना मदत हवी आहे$where';
+      body = t.notifNeedsHelp(from, where);
     } else if (lostName != null && lostName.isNotEmpty) {
-      final age = (lostAge == null || lostAge.isEmpty) ? '' : ', वय $lostAge';
-      body = '$lostName$age यांना शोधा — $from यांनी कळवले$where';
+      final age = (lostAge == null || lostAge.isEmpty)
+          ? ''
+          : ', ${t.notifAgePrefix} $lostAge';
+      body = t.notifLookFor(lostName, age, from, where);
     } else {
-      body = '$from यांनी जवळपास कोणीतरी हरवल्याचे कळवले$where';
+      body = t.notifSomeoneMissing(from, where);
     }
 
     await _plugin.show(
@@ -96,10 +98,10 @@ class NotificationService {
       // and can exceed that, so fold it down instead of passing it raw.
       id: packet.msgId % 100000,
       title: !isSos
-          ? '🔎 जवळपास कोणीतरी हरवले आहे'
+          ? t.notifMissingTitle
           : sosReasonIsSpecific(reason)
           ? '${sosReasonEmoji(reason)} ${t.sosReason(reason)} — SOS'
-          : '🆘 SOS आला आहे',
+          : t.notifSosTitle,
       body: body,
       notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
@@ -149,7 +151,7 @@ class NotificationService {
       // never replace an SOS notification that happens to fold to the same
       // number.
       id: 100000 + (message.msgId % 100000),
-      title: '📢 सूचना — ${message.displayName}',
+      title: t.notifAdvisoryTitle(message.displayName),
       body: message.body,
       notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
@@ -180,8 +182,8 @@ class NotificationService {
       // Its own fixed id: a second responder replaces the first rather than
       // stacking, and this can never collide with an alert notification.
       id: 900001,
-      title: 'मदत येत आहे',
-      body: '$who मदतीसाठी येत आहेत.',
+      title: t.notifHelpComingTitle,
+      body: t.notifHelpComingBody(who),
       notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
@@ -207,15 +209,15 @@ class NotificationService {
   /// child. Also like it, this is dismissible — it is news, not a summons.
   static Future<void> showPersonSpotted(String who, {String? lostName}) async {
     final subject = (lostName == null || lostName.isEmpty)
-        ? 'तुम्ही कळवलेली हरवलेली व्यक्ती'
+        ? t.notifThePersonYouReported
         : lostName;
     await _plugin.show(
       // Its own fixed id, next to showResponderComing's, so a sighting
       // replaces the previous sighting rather than stacking and can never
       // collide with an alert notification.
       id: 900002,
-      title: '👀 वारकरी दिसला',
-      body: '$who यांना $subject दिसले.',
+      title: t.notifSightingTitle,
+      body: t.notifSightingBody(who, subject),
       notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,

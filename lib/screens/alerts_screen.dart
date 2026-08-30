@@ -46,7 +46,7 @@ class AlertsScreen extends StatelessWidget {
                 padding: const EdgeInsets.only(right: 16),
                 child: Center(
                   child: StatusPill(
-                    text: '${mrNum(open)} प्रलंबित',
+                    text: t.openCount(open),
                     color: AppColors.sos,
                     icon: Icons.notifications_active_outlined,
                   ),

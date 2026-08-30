@@ -105,22 +105,19 @@ class _SosScreenState extends State<SosScreen>
 
     return Column(
       children: [
-        AppBar(
-          title: const Text('मदतीसाठी सूचना पाठवा'),
-          automaticallyImplyLeading: false,
-        ),
+        AppBar(title: Text(t.sendAlertTitle), automaticallyImplyLeading: false),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: SegmentedButton<int>(
-            segments: const [
-              ButtonSegment(
+            segments: [
+              const ButtonSegment(
                 value: kCategorySos,
                 label: Text('SOS'),
                 icon: Icon(Icons.sos),
               ),
               ButtonSegment(
                 value: kCategoryLostPerson,
-                label: Text('हरवलेली व्यक्ती'),
+                label: Text(t.lostPersonAlert),
                 icon: Icon(Icons.person_search),
               ),
             ],
@@ -188,7 +185,7 @@ class _SosScreenState extends State<SosScreen>
               // Diagnostic tail, kept in Arabic numerals on purpose — this
               // line is for confirming which packet went out, not for a
               // pilgrim mid-emergency. See the note in app_strings.dart.
-              'शेवटचे पाठवले: msg #${_lastSent!.msgId}',
+              '${t.lastSent}: msg #${_lastSent!.msgId}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
@@ -283,8 +280,8 @@ class _SosScreenState extends State<SosScreen>
         text = mesh.onCooldown
             ? t.sosCooldown(mesh.cooldownRemaining.inSeconds + 1)
             : _category == kCategorySos
-            ? '${t.sosSend} — दाबून ठेवा'
-            : '${t.lostPersonAlert} — दाबून ठेवा';
+            ? '${t.sosSend} — ${t.holdSuffix}'
+            : '${t.lostPersonAlert} — ${t.holdSuffix}';
         break;
       case _SendState.holding:
         text = t.sosKeepHolding;
@@ -298,7 +295,7 @@ class _SosScreenState extends State<SosScreen>
         // screen has just pressed an emergency button. It remains in the
         // activity log, which is where it belongs.
         text = _category != kCategorySos
-            ? '${t.lostPersonAlert} पाठवली आहे'
+            ? '${t.lostPersonAlert} ${t.alertNowSent}'
             : sosReasonIsSpecific(_sentReason)
             ? '${sosReasonEmoji(_sentReason)} ${t.sosReason(_sentReason)} — ${t.sosSent}'
             : t.sosSent;

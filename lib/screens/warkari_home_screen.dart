@@ -90,19 +90,26 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
-                  'नमस्कार, ${widget.warkari.name.split(' ').first}',
+                  '${t.greeting}, ${widget.warkari.name.split(' ').first}',
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
           ),
           actions: [
+            // One tap, always in the same place — the overflow menu was
+            // the wrong home for the one setting somebody needs when they
+            // cannot read the menu.
+            IconButton(
+              tooltip: 'भाषा / Language',
+              icon: const Icon(Icons.translate),
+              onPressed: () => showLanguageSheet(context),
+            ),
             PopupMenuButton<String>(
-              tooltip: 'खाते',
+              tooltip: t.account,
               icon: const Icon(Icons.person_outline),
               onSelected: (v) {
                 if (v == 'logout') widget.onLogout();
-                if (v == 'language') showLanguageSheet(context);
               },
               itemBuilder: (context) => [
                 PopupMenuItem<String>(
@@ -114,22 +121,12 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
                 ),
                 const PopupMenuDivider(),
                 PopupMenuItem<String>(
-                  value: 'language',
-                  child: Row(
-                    children: [
-                      const Icon(Icons.translate, size: 18),
-                      const SizedBox(width: 10),
-                      Text('${t.language} · ${t.languageName}'),
-                    ],
-                  ),
-                ),
-                const PopupMenuItem<String>(
                   value: 'logout',
                   child: Row(
                     children: [
-                      Icon(Icons.logout, size: 18),
-                      SizedBox(width: 10),
-                      Text('बाहेर पडा'),
+                      const Icon(Icons.logout, size: 18),
+                      const SizedBox(width: 10),
+                      Text(t.signOut),
                     ],
                   ),
                 ),
@@ -232,7 +229,7 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
                         color: AppColors.sos,
                         icon: Icons.sos,
                         title: t.sosSend,
-                        subtitle: 'जवळच्या फोनना कळवा',
+                        subtitle: t.sosSubtitle,
                         onTap: widget.onOpenSos,
                       ),
                     ),
@@ -241,10 +238,10 @@ class _WarkariHomeScreenState extends State<WarkariHomeScreen> {
                       child: ActionBox(
                         color: AppColors.lostPerson,
                         icon: Icons.person_search,
-                        title: 'हरवलेले',
+                        title: t.missingTitle,
                         subtitle: activeMissing == 0
-                            ? 'कळवा किंवा शोधा'
-                            : '${mrNum(activeMissing)} सुरू असलेले शोध',
+                            ? t.missingSubtitleIdle
+                            : t.missingSubtitleActive(activeMissing),
                         badge: activeMissing == 0 ? null : mrNum(activeMissing),
                         onTap: widget.onOpenMissing,
                       ),
